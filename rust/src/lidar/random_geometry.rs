@@ -20,16 +20,17 @@ impl INode2D for RandomGeometryGenerator {
     }
 
     fn ready(&mut self) {
-        const NUM_SHAPES: i32 = 10;
+        const NUM_SHAPES: i32 = 5;
         let screen_width = 1024.0;
         let screen_height = 1024.0;
 
         let mut polygons = Vec::new();
 
         for _ in 0..NUM_SHAPES {
-            if rand::random::<f32>() < 0.5 {
+            if rand::random::<f32>() < 1.0 {
                 godot_print!("Generating square!");
                 let square = self.generate_random_square(screen_width, screen_height);
+                godot_print!("Square polygon {}", square.get_polygon());
                 polygons.push(square.clone());
                 self.base_mut().add_child(square);
             } else {
@@ -67,12 +68,22 @@ impl RandomGeometryGenerator {
         let size = rand_range(50.0, 300.0);
 
         // Define the vertices for the square
-        let vertices = vec![
+        let mut vertices = vec![
             Vector2::new(0.0, 0.0),
             Vector2::new(size, 0.0),
             Vector2::new(size, size),
             Vector2::new(0.0, size),
         ];
+
+        let translation = Vector2::new(
+            rand_range(0.0, screen_width - size),
+            rand_range(0.0, screen_height - size),
+        );
+
+        for vertex in vertices.iter_mut() {
+            *vertex += translation;
+        }
+
         polygon.set_polygon(vertices.into());
 
         // Set the color for the square
@@ -84,12 +95,13 @@ impl RandomGeometryGenerator {
         );
         polygon.set_color(color);
 
-        // Set the position of the square
-        let position = Vector2::new(
-            rand_range(0.0, screen_width - size),
-            rand_range(0.0, screen_height - size),
-        );
-        polygon.set_position(position);
+        // Rather than setting position, set points directly to avoid having to transform from local -> global coords
+        //
+        // let position = Vector2::new(
+        //     rand_range(0.0, screen_width - size),
+        //     rand_range(0.0, screen_height - size),
+        // );
+        // polygon.set_position(position);
 
         polygon
     }
@@ -98,7 +110,17 @@ impl RandomGeometryGenerator {
         let mut circle = Polygon2D::new_alloc();
 
         let radius = rand_range(50.0, 250.0);
-        let polygon = self.create_circle_polygon(radius);
+        let mut polygon = self.create_circle_polygon(radius);
+
+        let translation = Vector2::new(
+            rand_range(0.0, screen_width - radius),
+            rand_range(0.0, screen_height - radius),
+        );
+
+        for vertex in polygon.iter_mut() {
+            *vertex += translation;
+        }
+
         circle.set_polygon(polygon.into());
 
         let color = Color::from_rgba(
@@ -109,11 +131,11 @@ impl RandomGeometryGenerator {
         );
         circle.set_color(color);
 
-        let position = Vector2::new(
-            rand_range(0.0, screen_width),
-            rand_range(0.0, screen_height),
-        );
-        circle.set_position(position);
+        // let position = Vector2::new(
+        //     rand_range(0.0, screen_width),
+        //     rand_range(0.0, screen_height),
+        // );
+        // circle.set_position(position);
 
         circle
     }
