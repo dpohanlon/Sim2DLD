@@ -2,7 +2,9 @@ mod random_geometry;
 
 use godot::prelude::*;
 
-use godot::classes::{AStar2D, Geometry2D, INode2D, Node2D, Polygon2D};
+use godot::classes::{
+    AStar2D, CollisionPolygon2D, Geometry2D, INode2D, Node2D, Polygon2D, RayCast2D, StaticBody2D,
+};
 
 use crate::lidar::random_geometry::RandomGeometryGenerator;
 
@@ -11,6 +13,7 @@ use crate::lidar::random_geometry::RandomGeometryGenerator;
 pub struct Lidar {
     base: Base<Node2D>,
     arena: Gd<Polygon2D>,
+    ray: Gd<RayCast2D>,
 }
 
 #[godot_api]
@@ -41,6 +44,7 @@ impl INode2D for Lidar {
         Self {
             base,
             arena: polygon,
+            ray: RayCast2D::new_alloc(),
         }
     }
 
@@ -55,13 +59,8 @@ impl INode2D for Lidar {
 
         let mut geometry2d = Geometry2D::singleton();
 
-        let poly_diffs = geometry2d.exclude_polygons(
-            self.arena.get_polygon(),
-            geom.bind().polygons[0].get_polygon(),
-        );
-
         godot_print!("Arena polygon {}", self.arena.get_polygon());
-        godot_print!("Query polygon {}", geom.bind().polygons[0].get_polygon());
+        // godot_print!("Query polygon {}", geom.bind().polygons[0].get_polygon());
 
         // for poly in poly_diffs.iter_shared() {
         //     let mut polygon = Polygon2D::new_alloc();
@@ -69,14 +68,6 @@ impl INode2D for Lidar {
         //     godot_print!("Diff polygon {}", polygon.get_polygon());
         //     self.base_mut().add_child(polygon);
         // }
-
-        let mut polygon = Polygon2D::new_alloc();
-        polygon.set_polygon(poly_diffs.at(0).clone());
-        godot_print!("Diff polygon {}", polygon.get_polygon());
-        // self.base_mut().add_child(polygon);
-
-        // let arena_b = self.arena.clone();
-        // self.base_mut().add_child(arena_b);
 
         godot_print!("I am LIDAR and I have {} polygons", poly_len);
 
@@ -168,6 +159,34 @@ impl INode2D for Lidar {
             let color = Color::from_rgba(0.0, 1.0, 0.0, 1.0);
             polygon.set_color(color);
             self.base_mut().add_child(polygon);
+        }
+
+        let mut static_body = StaticBody2D::new_alloc();
+
+        for poly in geom.bind().polygons.iter() {
+            let mut polygon = CollisionPolygon2D::new_alloc();
+            polygon.set_polygon(poly.get_polygon());
+            static_body.add_child(polygon);
+        }
+
+        self.base_mut().add_child(static_body);
+
+        let mut ray: Gd<RayCast2D> = RayCast2D::new_alloc();
+        ray.set_position(Vector2::new(0.0, 0.0));
+        ray.set_target_position(Vector2::new(1024., 1024.));
+        ray.set_collision_mask_value(1, true);
+        ray.set_enabled(true);
+
+        self.base_mut().add_child(ray.clone());
+
+        self.ray = ray.clone();
+
+        godot_print!("Ray collision: {}", ray.is_colliding());
+    }
+
+    fn process(&mut self, _delta: f64) {
+        if self.ray.is_colliding() {
+            godot_print!("Ray collision: {}", self.ray.get_collision_point());
         }
     }
 }
