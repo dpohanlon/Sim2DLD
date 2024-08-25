@@ -14,7 +14,7 @@ use crate::lidar::random_geometry::RandomGeometryGenerator;
 pub struct Lidar {
     base: Base<Node2D>,
     arena: Gd<Polygon2D>,
-    rays: Gd<RayCast2D>,
+    rays: Vec<Gd<RayCast2D>>,
 }
 
 #[godot_api]
@@ -45,7 +45,7 @@ impl INode2D for Lidar {
         Self {
             base,
             arena: polygon,
-            ray: RayCast2D::new_alloc(),
+            rays: Vec::<Gd<RayCast2D>>::new(),
         }
     }
 
@@ -172,26 +172,48 @@ impl INode2D for Lidar {
 
         self.base_mut().add_child(static_body);
 
-        let mut ray: Gd<RayCast2D> = RayCast2D::new_alloc();
-        ray.set_position(Vector2::new(0.0, 0.0));
-        ray.set_target_position(Vector2::new(1024., 1024.));
-        ray.set_collision_mask_value(1, true);
-        ray.set_enabled(true);
+        let n_rays = 30;
+        let d_max = 10000.0;
 
-        self.base_mut().add_child(ray.clone());
+        let angles = (0..n_rays).map(|i| i as f32 * 360.0 / n_rays as f32);
 
-        self.ray = ray.clone();
+        for angle in angles.clone() {
+            godot_print!("Angle: {}", angle);
+        }
 
-        godot_print!("Ray collision: {}", ray.is_colliding());
+        let directions = angles.map(|angle| {
+            Vector2::new(
+                d_max * angle.to_radians().cos(),
+                d_max * angle.to_radians().sin(),
+            )
+        });
+
+        for direction in directions {
+            godot_print!("Direction: {}", direction);
+            let mut ray: Gd<RayCast2D> = RayCast2D::new_alloc();
+            ray.set_position(Vector2::new(100.0, 100.0));
+            ray.set_target_position(direction);
+            ray.set_collision_mask_value(1, true);
+            ray.set_enabled(true);
+
+            self.base_mut().add_child(ray.clone());
+            self.rays.push(ray.clone());
+        }
     }
 
     fn process(&mut self, _delta: f64) {
         // Keep an array of all rays (and Line2Ds for rendering) and update these every frame
 
-        if self.ray.is_colliding() {
-            let point = self.ray.get_collision_point();
+        // let mut ray = self.rays[0].clone();
 
-            godot_print!("Ray collision: {}", point);
+        for ray in self.rays.clone().iter() {
+            let point = if ray.is_colliding() {
+                ray.get_collision_point()
+            } else {
+                ray.get_target_position()
+            };
+
+            // godot_print!("Ray collision: {}", point);
 
             let mut polygon = Polygon2D::new_alloc();
             let vertices = vec![
@@ -208,9 +230,14 @@ impl INode2D for Lidar {
 
             let mut line = Line2D::new_alloc();
             line.set_width(3.0);
-            line.add_point(Vector2::new(0.0, 0.0));
+            line.add_point(ray.get_position());
             line.add_point(point);
-            line.set_default_color(Color::from_rgba(0.0, 0.0, 1.0, 1.0));
+
+            if ray.is_colliding() {
+                line.set_default_color(Color::from_rgba(1.0, 0.0, 0.0, 1.0));
+            } else {
+                line.set_default_color(Color::from_rgba(0.0, 0.0, 1.0, 1.0));
+            }
 
             self.base_mut().add_child(line);
         }
