@@ -15,6 +15,8 @@ pub struct Lidar {
     base: Base<Node2D>,
     arena: Gd<Polygon2D>,
     rays: Vec<Gd<RayCast2D>>,
+    path: Vec<Vector2>,
+    path_idx: usize,
 }
 
 #[godot_api]
@@ -46,6 +48,8 @@ impl INode2D for Lidar {
             base,
             arena: polygon,
             rays: Vec::<Gd<RayCast2D>>::new(),
+            path: Vec::<Vector2>::new(),
+            path_idx: 0,
         }
     }
 
@@ -92,23 +96,6 @@ impl INode2D for Lidar {
             for j in 0..100 {
                 let y = j as f32 * (1024. / 100.);
 
-                // astar.add_point(i + 10 * j, Vector2::new(x, y));
-
-                // godot_print!("Point: {}", i + 10 * j);
-
-                // godot_print!(
-                //     "Points {} {} connected: {}",
-                //     i + 10 * j,
-                //     (i - 1) + 10 * j,
-                //     astar.are_points_connected(i + 10 * j, (i - 1) + 10 * j)
-                // );
-                // godot_print!(
-                //     "Points {} {} connected: {}",
-                //     i + 10 * j,
-                //     i + 10 * (j - 1),
-                //     astar.are_points_connected(i + 10 * j, i + 10 * (j - 1))
-                // );
-
                 let mut polygon = Polygon2D::new_alloc();
                 let vertices = vec![
                     Vector2::new(x, y),
@@ -145,6 +132,7 @@ impl INode2D for Lidar {
         }
 
         let path = astar.get_point_path(0, 6290);
+        self.path = path.to_vec();
         godot_print!("Path length: {}", path.to_vec().len());
 
         for point in path.to_vec().iter() {
@@ -204,9 +192,17 @@ impl INode2D for Lidar {
     fn process(&mut self, _delta: f64) {
         // Keep an array of all rays (and Line2Ds for rendering) and update these every frame
 
-        // let mut ray = self.rays[0].clone();
+        if self.path_idx >= self.path.len() - 1 {
+            return;
+        }
 
-        for ray in self.rays.clone().iter() {
+        let loc = self.path[self.path_idx];
+
+        for ray in self.rays.clone().iter_mut() {
+            // Update the ray origin, but this might not take effect on the collisions until next frame?
+
+            ray.set_position(loc);
+
             let point = if ray.is_colliding() {
                 ray.get_collision_point()
             } else {
@@ -241,6 +237,8 @@ impl INode2D for Lidar {
 
             self.base_mut().add_child(line);
         }
+
+        self.path_idx += 1;
     }
 }
 
