@@ -3,7 +3,8 @@ mod random_geometry;
 use godot::prelude::*;
 
 use godot::classes::{
-    AStar2D, CollisionPolygon2D, Geometry2D, INode2D, Node2D, Polygon2D, RayCast2D, StaticBody2D,
+    AStar2D, CollisionPolygon2D, Geometry2D, INode2D, Line2D, Node2D, Polygon2D, RayCast2D,
+    StaticBody2D,
 };
 
 use crate::lidar::random_geometry::RandomGeometryGenerator;
@@ -13,7 +14,7 @@ use crate::lidar::random_geometry::RandomGeometryGenerator;
 pub struct Lidar {
     base: Base<Node2D>,
     arena: Gd<Polygon2D>,
-    ray: Gd<RayCast2D>,
+    rays: Gd<RayCast2D>,
 }
 
 #[godot_api]
@@ -185,8 +186,33 @@ impl INode2D for Lidar {
     }
 
     fn process(&mut self, _delta: f64) {
+        // Keep an array of all rays (and Line2Ds for rendering) and update these every frame
+
         if self.ray.is_colliding() {
-            godot_print!("Ray collision: {}", self.ray.get_collision_point());
+            let point = self.ray.get_collision_point();
+
+            godot_print!("Ray collision: {}", point);
+
+            let mut polygon = Polygon2D::new_alloc();
+            let vertices = vec![
+                Vector2::new(point.x, point.y),
+                Vector2::new(point.x - 5.0, point.y),
+                Vector2::new(point.x - 5.0, point.y + 5.0),
+                Vector2::new(point.x, point.y + 5.0),
+            ];
+            polygon.set_polygon(vertices.into());
+            let color = Color::from_rgba(0.0, 0.0, 1.0, 1.0);
+            polygon.set_color(color);
+
+            self.base_mut().add_child(polygon);
+
+            let mut line = Line2D::new_alloc();
+            line.set_width(3.0);
+            line.add_point(Vector2::new(0.0, 0.0));
+            line.add_point(point);
+            line.set_default_color(Color::from_rgba(0.0, 0.0, 1.0, 1.0));
+
+            self.base_mut().add_child(line);
         }
     }
 }
