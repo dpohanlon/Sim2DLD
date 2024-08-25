@@ -243,6 +243,7 @@ impl INode2D for Lidar {
         // Keep an array of all rays (and Line2Ds for rendering) and update these every frame
 
         if self.path_idx >= self.path.len() - 1 {
+            self.base_mut().get_tree().unwrap().quit();
             return;
         }
 
