@@ -15,6 +15,7 @@ pub struct Lidar {
     base: Base<Node2D>,
     arena: Gd<Polygon2D>,
     rays: Vec<Gd<RayCast2D>>,
+    lines: Vec<Gd<Line2D>>,
     path: Vec<Vector2>,
     path_idx: usize,
 }
@@ -48,6 +49,7 @@ impl INode2D for Lidar {
             base,
             arena: polygon,
             rays: Vec::<Gd<RayCast2D>>::new(),
+            lines: Vec::<Gd<Line2D>>::new(),
             path: Vec::<Vector2>::new(),
             path_idx: 0,
         }
@@ -184,6 +186,13 @@ impl INode2D for Lidar {
             ray.set_collision_mask_value(1, true);
             ray.set_enabled(true);
 
+            let mut line = Line2D::new_alloc();
+            line.set_width(3.0);
+            line.add_point(ray.get_position());
+            line.add_point(ray.get_position());
+            self.base_mut().add_child(line.clone());
+            self.lines.push(line.clone());
+
             self.base_mut().add_child(ray.clone());
             self.rays.push(ray.clone());
         }
@@ -198,7 +207,7 @@ impl INode2D for Lidar {
 
         let loc = self.path[self.path_idx];
 
-        for ray in self.rays.clone().iter_mut() {
+        for (i, ray) in self.rays.clone().iter_mut().enumerate() {
             // Update the ray origin, but this might not take effect on the collisions until next frame?
 
             ray.set_position(loc);
@@ -211,21 +220,21 @@ impl INode2D for Lidar {
 
             // godot_print!("Ray collision: {}", point);
 
-            let mut polygon = Polygon2D::new_alloc();
-            let vertices = vec![
-                Vector2::new(point.x, point.y),
-                Vector2::new(point.x - 5.0, point.y),
-                Vector2::new(point.x - 5.0, point.y + 5.0),
-                Vector2::new(point.x, point.y + 5.0),
-            ];
-            polygon.set_polygon(vertices.into());
-            let color = Color::from_rgba(0.0, 0.0, 1.0, 1.0);
-            polygon.set_color(color);
+            // let mut polygon = Polygon2D::new_alloc();
+            // let vertices = vec![
+            //     Vector2::new(point.x, point.y),
+            //     Vector2::new(point.x - 5.0, point.y),
+            //     Vector2::new(point.x - 5.0, point.y + 5.0),
+            //     Vector2::new(point.x, point.y + 5.0),
+            // ];
+            // polygon.set_polygon(vertices.into());
+            // let color = Color::from_rgba(0.0, 0.0, 1.0, 1.0);
+            // polygon.set_color(color);
 
-            self.base_mut().add_child(polygon);
+            // self.base_mut().add_child(polygon);
 
-            let mut line = Line2D::new_alloc();
-            line.set_width(3.0);
+            let mut line = self.lines[i].clone();
+            line.clear_points();
             line.add_point(ray.get_position());
             line.add_point(point);
 
@@ -234,8 +243,6 @@ impl INode2D for Lidar {
             } else {
                 line.set_default_color(Color::from_rgba(0.0, 0.0, 1.0, 1.0));
             }
-
-            self.base_mut().add_child(line);
         }
 
         self.path_idx += 1;
