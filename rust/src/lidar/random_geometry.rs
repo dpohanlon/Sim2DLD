@@ -27,7 +27,7 @@ impl INode2D for RandomGeometryGenerator {
         let mut polygons = Vec::new();
 
         for _ in 0..NUM_SHAPES {
-            if rand::random::<f32>() < 1.0 {
+            if rand::random::<f32>() < 0.5 {
                 godot_print!("Generating square!");
                 let square = self.generate_random_square(screen_width, screen_height);
                 godot_print!("Square polygon {}", square.get_polygon());
@@ -87,12 +87,7 @@ impl RandomGeometryGenerator {
         polygon.set_polygon(vertices.into());
 
         // Set the color for the square
-        let color = Color::from_rgba(
-            rand::random::<f32>(),
-            rand::random::<f32>(),
-            rand::random::<f32>(),
-            1.0,
-        );
+        let color = Color::from_rgba(1., 1., 1., 1.0);
         polygon.set_color(color);
 
         // Rather than setting position, set points directly to avoid having to transform from local -> global coords
@@ -123,12 +118,7 @@ impl RandomGeometryGenerator {
 
         circle.set_polygon(polygon.into());
 
-        let color = Color::from_rgba(
-            rand::random::<f32>(),
-            rand::random::<f32>(),
-            rand::random::<f32>(),
-            1.0,
-        );
+        let color = Color::from_rgba(1., 1., 1., 1.0);
         circle.set_color(color);
 
         // let position = Vector2::new(
