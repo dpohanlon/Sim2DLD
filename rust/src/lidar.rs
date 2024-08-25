@@ -15,6 +15,8 @@ use serde_json::to_writer;
 use std::fs::File;
 use std::io::BufWriter;
 
+use std::env;
+
 use crate::lidar::random_geometry::RandomGeometryGenerator;
 
 // Wrap Array2 in a new struct
@@ -88,6 +90,9 @@ impl INode2D for Lidar {
     }
 
     fn ready(&mut self) {
+        let args: Vec<String> = env::args().collect();
+        godot_print!("Command-line arguments: {:?}", args);
+
         let geom = self.generate_geometry();
 
         // Register the geometry as a child of the Lidar node
@@ -199,10 +204,6 @@ impl INode2D for Lidar {
 
         let angles = (0..n_rays).map(|i| i as f32 * 360.0 / n_rays as f32);
 
-        for angle in angles.clone() {
-            godot_print!("Angle: {}", angle);
-        }
-
         let directions: Vec<Vector2> = angles
             .map(|angle| {
                 Vector2::new(
@@ -213,7 +214,7 @@ impl INode2D for Lidar {
             .collect();
 
         for direction in directions.iter() {
-            godot_print!("Direction: {}", direction);
+            // godot_print!("Direction: {}", direction);
             let mut ray: Gd<RayCast2D> = RayCast2D::new_alloc();
             ray.set_position(Vector2::new(100.0, 100.0));
             ray.set_target_position(*direction);

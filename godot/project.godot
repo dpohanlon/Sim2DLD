@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="godot_first"
-run/main_scene="res://sprite_2d.tscn"
+run/main_scene="res://lidar.tscn"
 config/features=PackedStringArray("4.3", "Forward Plus")
 config/icon="res://icon.svg"
 
@@ -19,3 +19,8 @@ config/icon="res://icon.svg"
 
 window/size/viewport_width=1024
 window/size/viewport_height=1024
+
+[rendering]
+
+textures/vram_compression/import_s3tc_bptc=true
+textures/vram_compression/import_etc2_astc=true
