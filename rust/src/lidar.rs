@@ -7,7 +7,39 @@ use godot::classes::{
     StaticBody2D,
 };
 
+use ndarray::{arr2, Array2};
+
+use serde::ser::{Serialize, Serializer};
+
+use serde_json::to_writer;
+use std::fs::File;
+use std::io::BufWriter;
+
 use crate::lidar::random_geometry::RandomGeometryGenerator;
+
+// Wrap Array2 in a new struct
+struct SerializableArray2<T> {
+    array: Array2<T>,
+}
+
+// Implement Serialize for the wrapper struct
+impl<T: Serialize + std::clone::Clone> Serialize for SerializableArray2<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Convert Array2 into a serializable Vec<Vec<T>>
+        let vec_of_vecs: Vec<Vec<T>> = self
+            .array
+            .rows()
+            .into_iter()
+            .map(|row| row.to_vec())
+            .collect();
+
+        // Serialize the Vec<Vec<T>>
+        vec_of_vecs.serialize(serializer)
+    }
+}
 
 #[derive(GodotClass)]
 #[class(base=Node2D)]
@@ -162,7 +194,7 @@ impl INode2D for Lidar {
 
         self.base_mut().add_child(static_body);
 
-        let n_rays = 30;
+        let n_rays = 360;
         let d_max = 10000.0;
 
         let angles = (0..n_rays).map(|i| i as f32 * 360.0 / n_rays as f32);
@@ -171,18 +203,20 @@ impl INode2D for Lidar {
             godot_print!("Angle: {}", angle);
         }
 
-        let directions = angles.map(|angle| {
-            Vector2::new(
-                d_max * angle.to_radians().cos(),
-                d_max * angle.to_radians().sin(),
-            )
-        });
+        let directions: Vec<Vector2> = angles
+            .map(|angle| {
+                Vector2::new(
+                    d_max * angle.to_radians().cos(),
+                    d_max * angle.to_radians().sin(),
+                )
+            })
+            .collect();
 
-        for direction in directions {
+        for direction in directions.iter() {
             godot_print!("Direction: {}", direction);
             let mut ray: Gd<RayCast2D> = RayCast2D::new_alloc();
             ray.set_position(Vector2::new(100.0, 100.0));
-            ray.set_target_position(direction);
+            ray.set_target_position(*direction);
             ray.set_collision_mask_value(1, true);
             ray.set_enabled(true);
 
@@ -196,6 +230,12 @@ impl INode2D for Lidar {
             self.base_mut().add_child(ray.clone());
             self.rays.push(ray.clone());
         }
+
+        let v = arr2(&[[1., 2.], [4., 5.]]);
+
+        let serializable_array = SerializableArray2 { array: v.clone() };
+
+        let _ = write_to_json("test.json", &serializable_array).unwrap();
     }
 
     fn process(&mut self, _delta: f64) {
@@ -230,7 +270,7 @@ impl INode2D for Lidar {
             // polygon.set_polygon(vertices.into());
             // let color = Color::from_rgba(0.0, 0.0, 1.0, 1.0);
             // polygon.set_color(color);
-
+            // // Slow
             // self.base_mut().add_child(polygon);
 
             let mut line = self.lines[i].clone();
@@ -247,6 +287,14 @@ impl INode2D for Lidar {
 
         self.path_idx += 1;
     }
+}
+
+// A function to write a serializable object to a JSON file
+fn write_to_json<T: Serialize>(filename: &str, data: &T) -> std::io::Result<()> {
+    let file = File::create(filename)?; // Open a file in write mode
+    let writer = BufWriter::new(file); // Create a buffered writer for efficient writing
+    to_writer(writer, data)?; // Serialize the data to JSON and write it to the file
+    Ok(())
 }
 
 impl Lidar {
