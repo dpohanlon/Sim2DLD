@@ -242,8 +242,9 @@ impl INode2D for Lidar {
     fn process(&mut self, _delta: f64) {
         // Keep an array of all rays (and Line2Ds for rendering) and update these every frame
 
-        if self.path_idx >= self.path.len() - 1 {
-            self.base_mut().get_tree().unwrap().quit();
+        if (self.path.len() == 0) || (self.path_idx >= self.path.len() - 1) {
+            self.base_mut().get_tree().unwrap().reload_current_scene();
+
             return;
         }
 
