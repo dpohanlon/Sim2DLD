@@ -13,6 +13,8 @@ use std::env;
 use std::fs::File;
 use std::io::BufWriter;
 
+use std::{thread, time};
+
 // Wrap Array2 in a new struct
 struct SerializableArray2<T> {
     array: Array2<T>,
@@ -46,6 +48,7 @@ pub struct Lidar {
     lines: Vec<Gd<Line2D>>,
     path: Vec<Vector2>,
     path_idx: usize,
+    angle: f32,
 }
 
 #[godot_api]
@@ -62,6 +65,7 @@ impl INode2D for Lidar {
             lines: Vec::<Gd<Line2D>>::new(),
             path: Vec::<Vector2>::new(),
             path_idx: 0,
+            angle: 0.0,
         }
     }
 
@@ -103,8 +107,18 @@ impl INode2D for Lidar {
         }
 
         let loc = self.path[self.path_idx];
-        self.update_rays_and_lines(loc);
+        let prev_loc = if self.path_idx > 0 {
+            self.path[self.path_idx - 1]
+        } else {
+            loc
+        };
+
+        self.update_rays_and_lines(loc, prev_loc);
         self.path_idx += 1;
+
+        let second = time::Duration::from_secs(1);
+
+        thread::sleep(second);
     }
 }
 
@@ -225,9 +239,10 @@ impl Lidar {
     }
 
     fn initialize_rays_and_lines(&mut self) {
-        let n_rays = 360;
+        let n_rays = 1;
         let d_max = 10000.0;
         let angles = (0..n_rays).map(|i| i as f32 * 360.0 / n_rays as f32);
+
         let directions: Vec<Vector2> = angles
             .map(|angle| {
                 Vector2::new(
@@ -256,8 +271,41 @@ impl Lidar {
         }
     }
 
-    fn update_rays_and_lines(&mut self, loc: Vector2) {
+    fn update_rays_and_lines(&mut self, loc: Vector2, prev_loc: Vector2) {
+        // Angle relative to heading
+        let angle = self.get_path_angle(prev_loc, loc);
+        let d_angle = angle - self.angle;
+
+        // Update heading
+        self.angle = angle;
+
+        godot_print!(
+            "Heading: {}, Angle: {}",
+            self.angle.to_degrees(),
+            angle.to_degrees()
+        );
+
+        // One step behind when rotating?
         for (i, ray) in self.rays.clone().iter_mut().enumerate() {
+            // Adjust for slew speed
+
+            let ray_angle = self.get_path_angle(ray.get_position(), ray.get_target_position());
+            let d_angle_ray = ray_angle - self.angle;
+
+            godot_print!(
+                "Ray original: {}, dAngle: {}",
+                ray_angle.to_degrees(),
+                d_angle_ray.to_degrees()
+            );
+
+            // Rotate the target position by relative difference in heading
+            let mut target = ray.get_target_position();
+            target = Vector2::new(
+                target.x * d_angle.cos() - target.y * d_angle.sin(),
+                target.x * d_angle.sin() + target.y * d_angle.cos(),
+            );
+            ray.set_target_position(target);
+
             ray.set_position(loc);
 
             let point = if ray.is_colliding() {
@@ -280,6 +328,11 @@ impl Lidar {
                 line.set_default_color(Color::from_rgba(0.0, 0.0, 1.0, 1.0));
             }
         }
+    }
+
+    fn get_path_angle(&self, loc: Vector2, next_loc: Vector2) -> f32 {
+        let diff = next_loc - loc;
+        diff.angle()
     }
 
     fn generate_geometry(&mut self) -> Gd<RandomGeometryGenerator> {
