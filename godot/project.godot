@@ -13,12 +13,18 @@ config_version=5
 config/name="godot_first"
 run/main_scene="res://lidar.tscn"
 config/features=PackedStringArray("4.3", "Forward Plus")
+run/max_fps=300
 config/icon="res://icon.svg"
+
+[debug]
+
+settings/stdout/print_fps=true
 
 [display]
 
 window/size/viewport_width=1024
 window/size/viewport_height=1024
+window/vsync/vsync_mode=0
 
 [rendering]
 

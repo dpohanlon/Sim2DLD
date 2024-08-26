@@ -20,7 +20,7 @@ impl INode2D for RandomGeometryGenerator {
     }
 
     fn ready(&mut self) {
-        const NUM_SHAPES: i32 = 5;
+        const NUM_SHAPES: i32 = 10;
         let screen_width = 1024.0;
         let screen_height = 1024.0;
 
