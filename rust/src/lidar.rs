@@ -6,7 +6,7 @@ use godot::classes::{
     StaticBody2D,
 };
 use godot::prelude::*;
-use ndarray::{arr2, Array2};
+use ndarray::Array2;
 use serde::ser::{Serialize, Serializer};
 use serde_json::to_writer;
 use std::env;
@@ -39,6 +39,14 @@ impl<T: Serialize + std::clone::Clone> Serialize for SerializableArray2<T> {
     }
 }
 
+// A function to write a serializable object to a JSON file
+fn write_to_json<T: Serialize>(filename: &str, data: &T) -> std::io::Result<()> {
+    let file = File::create(filename)?; // Open a file in write mode
+    let writer = BufWriter::new(file); // Create a buffered writer for efficient writing
+    to_writer(writer, data)?; // Serialize the data to JSON and write it to the file
+    Ok(())
+}
+
 #[derive(GodotClass)]
 #[class(base=Node2D)]
 pub struct Lidar {
@@ -49,6 +57,7 @@ pub struct Lidar {
     path: Vec<Vector2>,
     path_idx: usize,
     angle: f32,
+    returns: Vec<Array2<f64>>,
 }
 
 #[godot_api]
@@ -66,6 +75,7 @@ impl INode2D for Lidar {
             path: Vec::<Vector2>::new(),
             path_idx: 0,
             angle: 0.0,
+            returns: Vec::<Array2<f64>>::new(),
         }
     }
 
@@ -93,15 +103,22 @@ impl INode2D for Lidar {
         let static_body = self.create_static_body(&geom);
         self.base_mut().add_child(static_body);
 
-        self.initialize_rays_and_lines();
+        // TODO: Align heading with the first segment of the path
 
-        let v = arr2(&[[1., 2.], [4., 5.]]);
-        let serializable_array = SerializableArray2 { array: v.clone() };
-        let _ = write_to_json("test.json", &serializable_array).unwrap();
+        self.initialize_rays_and_lines();
     }
 
     fn process(&mut self, _delta: f64) {
         if self.path.is_empty() || self.path_idx >= self.path.len() - 1 {
+            let serializable_arrays: Vec<SerializableArray2<f64>> = self
+                .returns
+                .clone()
+                .into_iter()
+                .map(|array| SerializableArray2 { array })
+                .collect();
+
+            let _ = write_to_json("test.json", &serializable_arrays).unwrap();
+
             self.base_mut().get_tree().unwrap().reload_current_scene();
             return;
         }
@@ -116,9 +133,7 @@ impl INode2D for Lidar {
         self.update_rays_and_lines(loc, prev_loc);
         self.path_idx += 1;
 
-        let second = time::Duration::from_secs(1);
-
-        thread::sleep(second);
+        // thread::sleep(time::Duration::from_secs(1));
     }
 }
 
@@ -239,7 +254,7 @@ impl Lidar {
     }
 
     fn initialize_rays_and_lines(&mut self) {
-        let n_rays = 1;
+        let n_rays = 360;
         let d_max = 10000.0;
         let angles = (0..n_rays).map(|i| i as f32 * 360.0 / n_rays as f32);
 
@@ -285,6 +300,8 @@ impl Lidar {
             angle.to_degrees()
         );
 
+        let mut ray_returns: Array2<f64> = Array2::zeros((360, 2));
+
         // One step behind when rotating?
         for (i, ray) in self.rays.clone().iter_mut().enumerate() {
             // Adjust for slew speed
@@ -314,6 +331,10 @@ impl Lidar {
                 ray.get_target_position()
             };
 
+            // Actually I want distance and theta, not x and y
+            ray_returns[[i, 0]] = point.x as f64;
+            ray_returns[[i, 1]] = point.y as f64;
+
             // Slowwww
             // self.draw_point(&point, Color::from_rgba(0.0, 0.0, 1.0, 1.0));
 
@@ -328,6 +349,8 @@ impl Lidar {
                 line.set_default_color(Color::from_rgba(0.0, 0.0, 1.0, 1.0));
             }
         }
+
+        self.returns.push(ray_returns);
     }
 
     fn get_path_angle(&self, loc: Vector2, next_loc: Vector2) -> f32 {
@@ -339,12 +362,4 @@ impl Lidar {
         godot_print!("Generating geometry!");
         random_geometry::RandomGeometryGenerator::new()
     }
-}
-
-// A function to write a serializable object to a JSON file
-fn write_to_json<T: Serialize>(filename: &str, data: &T) -> std::io::Result<()> {
-    let file = File::create(filename)?; // Open a file in write mode
-    let writer = BufWriter::new(file); // Create a buffered writer for efficient writing
-    to_writer(writer, data)?; // Serialize the data to JSON and write it to the file
-    Ok(())
 }
