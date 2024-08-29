@@ -30,7 +30,6 @@ impl INode2D for RandomGeometryGenerator {
             if rand::random::<f32>() < 0.5 {
                 // godot_print!("Generating square!");
                 let square = self.generate_random_square(screen_width, screen_height);
-                godot_print!("Square polygon {}", square.get_polygon());
                 polygons.push(square.clone());
                 self.base_mut().add_child(square);
             } else {
@@ -41,15 +40,26 @@ impl INode2D for RandomGeometryGenerator {
             }
         }
 
-        self.polygons = polygons;
         // godot_print!(
         //     "I am RandomGeometry and I have {} polygons",
         //     self.polygons.len()
         // );
-    }
+        //
 
-    fn process(&mut self, _delta: f64) {
-        // If you need to implement `_process` in Godot, you can put the logic here
+        let arena_width = 1024.0; // Example arena size
+        let arena_height = 1024.0; // Example arena size
+        let wall_thickness = 10.0; // Example wall thickness
+
+        // Generate walls
+        let walls = self.create_arena_walls(arena_width, arena_height, wall_thickness);
+
+        // Add walls to the scene
+        for wall in walls {
+            polygons.push(wall.clone());
+            self.base_mut().add_child(wall);
+        }
+
+        self.polygons = polygons;
     }
 }
 
@@ -138,6 +148,58 @@ impl RandomGeometryGenerator {
             points.push(Vector2::new(angle.cos(), angle.sin()) * radius);
         }
         points
+    }
+
+    // Function to generate four walls for an arena with specified size and wall thickness
+    fn create_arena_walls(
+        &self,
+        arena_width: f32,
+        arena_height: f32,
+        wall_thickness: f32,
+    ) -> Vec<Gd<Polygon2D>> {
+        let mut walls = Vec::new();
+
+        // Top wall
+        walls.push(self.create_wall(arena_width, wall_thickness, Vector2::new(0.0, 0.0)));
+
+        // Bottom wall
+        walls.push(self.create_wall(
+            arena_width,
+            wall_thickness,
+            Vector2::new(0.0, arena_height - wall_thickness),
+        ));
+
+        // Left wall
+        walls.push(self.create_wall(wall_thickness, arena_height, Vector2::new(0.0, 0.0)));
+
+        // Right wall
+        walls.push(self.create_wall(
+            wall_thickness,
+            arena_height,
+            Vector2::new(arena_width - wall_thickness, 0.0),
+        ));
+
+        walls
+    }
+
+    fn create_wall(&self, width: f32, height: f32, position: Vector2) -> Gd<Polygon2D> {
+        let mut wall = Polygon2D::new_alloc();
+
+        // Define the vertices for the rectangle
+        let vertices = vec![
+            Vector2::new(0.0, 0.0),
+            Vector2::new(width, 0.0),
+            Vector2::new(width, height),
+            Vector2::new(0.0, height),
+        ];
+
+        wall.set_polygon(vertices.into());
+        wall.set_position(position);
+
+        // Set wall color (optional)
+        wall.set_color(Color::from_rgba(0.5, 0.5, 0.5, 1.0)); // Gray color
+
+        wall
     }
 }
 

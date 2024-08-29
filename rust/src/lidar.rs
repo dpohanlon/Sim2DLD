@@ -101,13 +101,14 @@ impl INode2D for Lidar {
 
         self.base_mut().add_child(geom.clone());
         let poly_len = geom.bind().polygons.len();
-        // godot_print!("I am LIDAR and I have {} polygons", poly_len);
+        godot_print!("I am LIDAR and I have {} polygons", poly_len);
 
         self.create_astar_grid();
 
         let path = self.calculate_path(&geom);
         self.path = path;
-        // godot_print!("Path length: {}", self.path.len());
+        godot_print!("Path length: {}", self.path.len());
+        godot_print!("Path (0): {}", self.path[0]);
 
         let points = self.path.clone();
         for point in points.iter() {
@@ -155,7 +156,7 @@ impl INode2D for Lidar {
         self.update_rays_and_lines(loc, prev_loc);
         self.path_idx += 1;
 
-        // thread::sleep(time::Duration::from_secs(1));
+        thread::sleep(time::Duration::from_secs(1));
     }
 }
 
@@ -244,7 +245,7 @@ impl Lidar {
         }
 
         // Calculate and return the path from point 0 to point 6290 (end point)
-        astar.get_point_path(0, 6290).to_vec()
+        astar.get_point_path(702, 6290).to_vec()
     }
 
     fn draw_point(&mut self, point: &Vector2, color: Color) {
@@ -262,9 +263,12 @@ impl Lidar {
 
     fn create_static_body(&self, geom: &Gd<RandomGeometryGenerator>) -> Gd<StaticBody2D> {
         let mut static_body = StaticBody2D::new_alloc();
+        godot_print!("Geoms: {}", geom.bind().polygons.len());
         for poly in geom.bind().polygons.iter() {
+            godot_print!("Adding polygon to static body, {}", poly);
             let mut polygon = CollisionPolygon2D::new_alloc();
             polygon.set_polygon(poly.get_polygon());
+            godot_print!("pol, {}", poly.get_polygon());
             static_body.add_child(polygon);
         }
         static_body
@@ -366,7 +370,12 @@ impl Lidar {
             if ray.is_colliding() {
                 line.set_default_color(Color::from_rgba(1.0, 0.0, 0.0, 1.0));
             } else {
-                line.set_default_color(Color::from_rgba(0.0, 0.0, 1.0, 1.0));
+                line.set_default_color(Color::from_rgba(
+                    // 255. / 255.,
+                    // 140. / 255.,
+                    // 158. / 255.,
+                    0.0, 1.0, 0.0, 1.0,
+                ));
             }
         }
 
