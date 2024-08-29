@@ -1,9 +1,11 @@
 mod random_geometry;
 
+use std::sync::Mutex;
+
 use crate::lidar::random_geometry::RandomGeometryGenerator;
 use godot::classes::{
     AStar2D, CollisionPolygon2D, Geometry2D, INode2D, Line2D, Node2D, Polygon2D, RayCast2D,
-    StaticBody2D,
+    RenderingServer, StaticBody2D,
 };
 use godot::prelude::*;
 use ndarray::Array2;
@@ -60,10 +62,13 @@ pub struct Lidar {
     returns: Vec<Array2<f64>>,
 }
 
+// Static variable declaration outside the struct and impl block
+static LIDAR_COUNT: Mutex<u32> = Mutex::new(0); // Static mutable variable to track instances
+
 #[godot_api]
 impl INode2D for Lidar {
     fn init(base: Base<Node2D>) -> Self {
-        godot_print!("Hello, world!");
+        // godot_print!("Hello, world!");
 
         let polygon = Self::create_arena_polygon(1024., 1024.);
 
@@ -80,6 +85,15 @@ impl INode2D for Lidar {
     }
 
     fn ready(&mut self) {
+        godot_print!("Count {}", LIDAR_COUNT.lock().unwrap());
+
+        RenderingServer::singleton().set_default_clear_color(Color::from_rgba(
+            255. / 255.,
+            218. / 255.,
+            118. / 255.,
+            1.0,
+        ));
+
         let args: Vec<String> = env::args().collect();
         godot_print!("Command-line arguments: {:?}", args);
 
@@ -87,13 +101,13 @@ impl INode2D for Lidar {
 
         self.base_mut().add_child(geom.clone());
         let poly_len = geom.bind().polygons.len();
-        godot_print!("I am LIDAR and I have {} polygons", poly_len);
+        // godot_print!("I am LIDAR and I have {} polygons", poly_len);
 
-        self.create_astar_grid(&geom);
+        self.create_astar_grid();
 
         let path = self.calculate_path(&geom);
         self.path = path;
-        godot_print!("Path length: {}", self.path.len());
+        // godot_print!("Path length: {}", self.path.len());
 
         let points = self.path.clone();
         for point in points.iter() {
@@ -110,14 +124,22 @@ impl INode2D for Lidar {
 
     fn process(&mut self, _delta: f64) {
         if self.path.is_empty() || self.path_idx >= self.path.len() - 1 {
-            let serializable_arrays: Vec<SerializableArray2<f64>> = self
-                .returns
-                .clone()
-                .into_iter()
-                .map(|array| SerializableArray2 { array })
-                .collect();
+            if !self.path.is_empty() {
+                let serializable_arrays: Vec<SerializableArray2<f64>> = self
+                    .returns
+                    .clone()
+                    .into_iter()
+                    .map(|array| SerializableArray2 { array })
+                    .collect();
 
-            let _ = write_to_json("test.json", &serializable_arrays).unwrap();
+                let mut count = LIDAR_COUNT.lock().unwrap(); // Lock the mutex before modifying
+
+                let filename = format!("test_{}.json", count);
+
+                let _ = write_to_json(&filename, &serializable_arrays).unwrap();
+
+                *count += 1;
+            }
 
             self.base_mut().get_tree().unwrap().reload_current_scene();
             return;
@@ -151,9 +173,8 @@ impl Lidar {
         polygon
     }
 
-    fn create_astar_grid(&mut self, geom: &Gd<RandomGeometryGenerator>) {
+    fn create_astar_grid(&mut self) {
         let mut astar = AStar2D::new_gd();
-        let mut geometry2d = Geometry2D::singleton();
 
         for i in 0..100 {
             for j in 0..100 {
@@ -161,15 +182,11 @@ impl Lidar {
                 let y = j as f32 * (1024. / 100.);
                 astar.add_point(i + 100 * j, Vector2::new(x, y));
 
-                if self.is_point_occluded(x, y, geom, &mut geometry2d) {
-                    self.draw_point(&Vector2::new(x, y), Color::from_rgba(1.0, 0.0, 0.0, 1.0));
-                } else {
-                    if i > 0 {
-                        astar.connect_points(i + 100 * j, (i - 1) + 100 * j);
-                    }
-                    if j > 0 {
-                        astar.connect_points(i + 100 * j, i + 100 * (j - 1));
-                    }
+                if i > 0 {
+                    astar.connect_points(i + 100 * j, (i - 1) + 100 * j);
+                }
+                if j > 0 {
+                    astar.connect_points(i + 100 * j, i + 100 * (j - 1));
                 }
             }
         }
@@ -294,11 +311,11 @@ impl Lidar {
         // Update heading
         self.angle = angle;
 
-        godot_print!(
-            "Heading: {}, Angle: {}",
-            self.angle.to_degrees(),
-            angle.to_degrees()
-        );
+        // godot_print!(
+        //     "Heading: {}, Angle: {}",
+        //     self.angle.to_degrees(),
+        //     angle.to_degrees()
+        // );
 
         let mut ray_returns: Array2<f64> = Array2::zeros((360, 2));
 
@@ -309,11 +326,11 @@ impl Lidar {
             let ray_angle = self.get_path_angle(ray.get_position(), ray.get_target_position());
             let d_angle_ray = ray_angle - self.angle;
 
-            godot_print!(
-                "Ray original: {}, dAngle: {}",
-                ray_angle.to_degrees(),
-                d_angle_ray.to_degrees()
-            );
+            // godot_print!(
+            //     "Ray original: {}, dAngle: {}",
+            //     ray_angle.to_degrees(),
+            //     d_angle_ray.to_degrees()
+            // );
 
             // Rotate the target position by relative difference in heading
             let mut target = ray.get_target_position();
@@ -331,9 +348,12 @@ impl Lidar {
                 ray.get_target_position()
             };
 
-            // Actually I want distance and theta, not x and y
-            ray_returns[[i, 0]] = point.x as f64;
-            ray_returns[[i, 1]] = point.y as f64;
+            let dx = point.x - ray.get_position().x;
+            let dy = point.y - ray.get_position().y;
+            let distance = (dx * dx + dy * dy).sqrt();
+
+            ray_returns[[i, 0]] = distance as f64;
+            ray_returns[[i, 1]] = ray_angle as f64;
 
             // Slowwww
             // self.draw_point(&point, Color::from_rgba(0.0, 0.0, 1.0, 1.0));
@@ -359,7 +379,7 @@ impl Lidar {
     }
 
     fn generate_geometry(&mut self) -> Gd<RandomGeometryGenerator> {
-        godot_print!("Generating geometry!");
+        // godot_print!("Generating geometry!");
         random_geometry::RandomGeometryGenerator::new()
     }
 }

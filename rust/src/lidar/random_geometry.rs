@@ -11,7 +11,7 @@ pub struct RandomGeometryGenerator {
 #[godot_api]
 impl INode2D for RandomGeometryGenerator {
     fn init(base: Base<Node2D>) -> Self {
-        godot_print!("Hello, world! I am RandomGeometryGenerator");
+        // godot_print!("Hello, world! I am RandomGeometryGenerator");
 
         Self {
             base,
@@ -28,13 +28,13 @@ impl INode2D for RandomGeometryGenerator {
 
         for _ in 0..NUM_SHAPES {
             if rand::random::<f32>() < 0.5 {
-                godot_print!("Generating square!");
+                // godot_print!("Generating square!");
                 let square = self.generate_random_square(screen_width, screen_height);
                 godot_print!("Square polygon {}", square.get_polygon());
                 polygons.push(square.clone());
                 self.base_mut().add_child(square);
             } else {
-                godot_print!("Generating circle!");
+                // godot_print!("Generating circle!");
                 let circle = self.generate_random_circle(screen_width, screen_height);
                 polygons.push(circle.clone());
                 self.base_mut().add_child(circle);
@@ -42,10 +42,10 @@ impl INode2D for RandomGeometryGenerator {
         }
 
         self.polygons = polygons;
-        godot_print!(
-            "I am RandomGeometry and I have {} polygons",
-            self.polygons.len()
-        );
+        // godot_print!(
+        //     "I am RandomGeometry and I have {} polygons",
+        //     self.polygons.len()
+        // );
     }
 
     fn process(&mut self, _delta: f64) {
@@ -87,7 +87,7 @@ impl RandomGeometryGenerator {
         polygon.set_polygon(vertices.into());
 
         // Set the color for the square
-        let color = Color::from_rgba(1., 1., 1., 1.0);
+        let color = Color::from_rgba(180. / 255., 214. / 255., 205. / 255., 1.0);
         polygon.set_color(color);
 
         // Rather than setting position, set points directly to avoid having to transform from local -> global coords
@@ -118,7 +118,7 @@ impl RandomGeometryGenerator {
 
         circle.set_polygon(polygon.into());
 
-        let color = Color::from_rgba(1., 1., 1., 1.0);
+        let color = Color::from_rgba(180. / 255., 214. / 255., 205. / 255., 1.0);
         circle.set_color(color);
 
         // let position = Vector2::new(
