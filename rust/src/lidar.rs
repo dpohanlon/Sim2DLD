@@ -59,6 +59,9 @@ pub struct Lidar {
     path: Vec<Vector2>,
     path_idx: usize,
     angle: f32,
+    target_angle: f32,
+    slewing: bool,
+    slew_rate: f32,
     returns: Vec<Array2<f64>>,
 }
 
@@ -68,8 +71,6 @@ static LIDAR_COUNT: Mutex<u32> = Mutex::new(0); // Static mutable variable to tr
 #[godot_api]
 impl INode2D for Lidar {
     fn init(base: Base<Node2D>) -> Self {
-        // godot_print!("Hello, world!");
-
         let polygon = Self::create_arena_polygon(1024., 1024.);
 
         Self {
@@ -80,6 +81,10 @@ impl INode2D for Lidar {
             path: Vec::<Vector2>::new(),
             path_idx: 0,
             angle: 0.0,
+            target_angle: 0.0,
+            slewing: false,
+            // slew_rate: 90.0,
+            slew_rate: 10.0,
             returns: Vec::<Array2<f64>>::new(),
         }
     }
@@ -126,40 +131,76 @@ impl INode2D for Lidar {
         self.initialize_rays_and_lines();
     }
 
-    fn process(&mut self, _delta: f64) {
-        if self.path.is_empty() || self.path_idx >= self.path.len() - 1 {
-            if !self.path.is_empty() {
-                let serializable_arrays: Vec<SerializableArray2<f64>> = self
-                    .returns
-                    .clone()
-                    .into_iter()
-                    .map(|array| SerializableArray2 { array })
-                    .collect();
+    fn process(&mut self, delta: f64) {
+        if self.slewing {
+            godot_print!(
+                "Slewing, target {}, angle {}",
+                self.target_angle,
+                self.angle
+            );
+            // If slewing, calculate the rotation amount based on the slew rate and time delta
+            let rotation_speed = self.slew_rate * delta as f32; // degrees per frame based on time delta
+            let angle_diff = self.target_angle - self.angle;
+            let rotation_step = angle_diff.signum() * rotation_speed.min(angle_diff.abs());
 
-                let mut count = LIDAR_COUNT.lock().unwrap(); // Lock the mutex before modifying
+            // Update the Lidar's angle
+            self.angle += rotation_step;
 
-                let filename = format!("test_{}.json", count);
-
-                let _ = write_to_json(&filename, &serializable_arrays).unwrap();
-
-                *count += 1;
+            // Check if we have reached the target angle
+            if (self.target_angle - self.angle).abs() < 1E-4 {
+                self.angle = self.target_angle; // Snap to target angle
+                self.slewing = false; // Finished slewing
             }
 
-            self.base_mut().get_tree().unwrap().reload_current_scene();
-            return;
-        }
-
-        let loc = self.path[self.path_idx];
-        let prev_loc = if self.path_idx > 0 {
-            self.path[self.path_idx - 1]
+            // Update rays' positions and orientations
+            self.update_rays_rotation();
         } else {
-            loc
-        };
+            // If not slewing, handle the movement along the path
+            if self.path.is_empty() || self.path_idx >= self.path.len() - 1 {
+                if !self.path.is_empty() {
+                    let serializable_arrays: Vec<SerializableArray2<f64>> = self
+                        .returns
+                        .clone()
+                        .into_iter()
+                        .map(|array| SerializableArray2 { array })
+                        .collect();
 
-        self.update_rays_and_lines(loc, prev_loc);
-        self.path_idx += 1;
+                    let mut count = LIDAR_COUNT.lock().unwrap(); // Lock the mutex before modifying
 
-        // thread::sleep(time::Duration::from_secs(1));
+                    let filename = format!("test_{}.json", count);
+
+                    let _ = write_to_json(&filename, &serializable_arrays).unwrap();
+
+                    *count += 1;
+                }
+
+                self.base_mut().get_tree().unwrap().reload_current_scene();
+                return;
+            }
+
+            let loc = self.path[self.path_idx];
+            let prev_loc = if self.path_idx > 0 {
+                self.path[self.path_idx - 1]
+            } else {
+                loc
+            };
+
+            let desired_angle = self.get_path_angle(prev_loc, loc);
+
+            // Check if the Lidar needs to rotate to face the new direction
+            if (self.angle - desired_angle).abs() > 1E-4 {
+                // Start slewing to the desired angle
+                self.slewing = true;
+                self.target_angle = desired_angle;
+            } else {
+                // Move to the next point in the path
+                self.update_rays_and_lines(loc, prev_loc);
+                self.path_idx += 1;
+            }
+
+            // Optional: introduce a delay for testing
+            // thread::sleep(time::Duration::from_secs(1));
+        }
     }
 }
 
@@ -369,6 +410,25 @@ impl Lidar {
     fn get_path_angle(&self, loc: Vector2, next_loc: Vector2) -> f32 {
         let diff = next_loc - loc;
         diff.angle()
+    }
+
+    fn update_rays_rotation(&mut self) {
+        let loc = self.path[self.path_idx]; // Get Lidar's global position
+        let rotation_radians = self.angle.to_radians();
+
+        for ray in self.rays.iter_mut() {
+            let ray_position = ray.get_position();
+            let offset = ray.get_target_position() - ray_position;
+
+            // Rotate each ray's target position
+            let rotated_offset = Vector2::new(
+                offset.x * rotation_radians.cos() - offset.y * rotation_radians.sin(),
+                offset.x * rotation_radians.sin() + offset.y * rotation_radians.cos(),
+            );
+
+            ray.set_target_position(ray_position + rotated_offset);
+            ray.set_position(loc);
+        }
     }
 
     fn generate_geometry(&mut self) -> Gd<RandomGeometryGenerator> {
