@@ -185,16 +185,15 @@ impl RandomGeometryGenerator {
     fn create_wall(&self, width: f32, height: f32, position: Vector2) -> Gd<Polygon2D> {
         let mut wall = Polygon2D::new_alloc();
 
-        // Define the vertices for the rectangle
+        // Offset the vertices by the position
         let vertices = vec![
-            Vector2::new(0.0, 0.0),
-            Vector2::new(width, 0.0),
-            Vector2::new(width, height),
-            Vector2::new(0.0, height),
+            Vector2::new(0.0, 0.0) + position,
+            Vector2::new(width, 0.0) + position,
+            Vector2::new(width, height) + position,
+            Vector2::new(0.0, height) + position,
         ];
 
         wall.set_polygon(vertices.into());
-        wall.set_position(position);
 
         // Set wall color (optional)
         wall.set_color(Color::from_rgba(0.5, 0.5, 0.5, 1.0)); // Gray color

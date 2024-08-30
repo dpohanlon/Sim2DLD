@@ -112,7 +112,10 @@ impl INode2D for Lidar {
 
         let points = self.path.clone();
         for point in points.iter() {
-            self.draw_point(&point, Color::from_rgba(0.0, 1.0, 0.0, 1.0));
+            self.draw_point(
+                &point,
+                Color::from_rgba(255. / 255., 78. / 255., 136. / 255., 1.0),
+            );
         }
 
         let static_body = self.create_static_body(&geom);
@@ -156,7 +159,7 @@ impl INode2D for Lidar {
         self.update_rays_and_lines(loc, prev_loc);
         self.path_idx += 1;
 
-        thread::sleep(time::Duration::from_secs(1));
+        // thread::sleep(time::Duration::from_secs(1));
     }
 }
 
@@ -276,7 +279,7 @@ impl Lidar {
 
     fn initialize_rays_and_lines(&mut self) {
         let n_rays = 360;
-        let d_max = 10000.0;
+        let d_max = 100000.0;
         let angles = (0..n_rays).map(|i| i as f32 * 360.0 / n_rays as f32);
 
         let directions: Vec<Vector2> = angles
@@ -308,75 +311,56 @@ impl Lidar {
     }
 
     fn update_rays_and_lines(&mut self, loc: Vector2, prev_loc: Vector2) {
-        // Angle relative to heading
+        // Calculate change in angle
         let angle = self.get_path_angle(prev_loc, loc);
         let d_angle = angle - self.angle;
+        self.angle = angle; // Update Lidar heading angle
 
-        // Update heading
-        self.angle = angle;
-
-        // godot_print!(
-        //     "Heading: {}, Angle: {}",
-        //     self.angle.to_degrees(),
-        //     angle.to_degrees()
-        // );
-
+        // Ensure rays are sufficiently long and have correct target positions
         let mut ray_returns: Array2<f64> = Array2::zeros((360, 2));
 
-        // One step behind when rotating?
         for (i, ray) in self.rays.clone().iter_mut().enumerate() {
-            // Adjust for slew speed
+            // Get the current position of the ray
+            let ray_pos = ray.get_position();
+            let target_pos = ray.get_target_position();
 
-            let ray_angle = self.get_path_angle(ray.get_position(), ray.get_target_position());
-            let d_angle_ray = ray_angle - self.angle;
+            // Compute vector from ray position to its target
+            let offset = target_pos - ray_pos;
 
-            // godot_print!(
-            //     "Ray original: {}, dAngle: {}",
-            //     ray_angle.to_degrees(),
-            //     d_angle_ray.to_degrees()
-            // );
-
-            // Rotate the target position by relative difference in heading
-            let mut target = ray.get_target_position();
-            target = Vector2::new(
-                target.x * d_angle.cos() - target.y * d_angle.sin(),
-                target.x * d_angle.sin() + target.y * d_angle.cos(),
+            // Apply rotation matrix to adjust for the new heading
+            let rotated_offset = Vector2::new(
+                offset.x * d_angle.cos() - offset.y * d_angle.sin(),
+                offset.x * d_angle.sin() + offset.y * d_angle.cos(),
             );
-            ray.set_target_position(target);
 
-            ray.set_position(loc);
+            // Update the ray target position relative to its base
+            let new_target_position = ray_pos + rotated_offset;
+            ray.set_target_position(new_target_position);
+            ray.set_position(loc); // Ensure ray position moves with the Lidar
 
-            let point = if ray.is_colliding() {
+            // Check for collision
+            let collision_point = if ray.is_colliding() {
                 ray.get_collision_point()
             } else {
                 ray.get_target_position()
             };
 
-            let dx = point.x - ray.get_position().x;
-            let dy = point.y - ray.get_position().y;
-            let distance = (dx * dx + dy * dy).sqrt();
-
+            // Update ray return data with distance and angle
+            let distance = (collision_point - ray.get_position()).length();
+            let ray_angle = self.get_path_angle(ray.get_position(), collision_point);
             ray_returns[[i, 0]] = distance as f64;
             ray_returns[[i, 1]] = ray_angle as f64;
 
-            // Slowwww
-            // self.draw_point(&point, Color::from_rgba(0.0, 0.0, 1.0, 1.0));
-
+            // Update visual line representation
             let mut line = self.lines[i].clone();
             line.clear_points();
             line.add_point(ray.get_position());
-            line.add_point(point);
-
-            if ray.is_colliding() {
-                line.set_default_color(Color::from_rgba(1.0, 0.0, 0.0, 1.0));
+            line.add_point(collision_point);
+            line.set_default_color(if ray.is_colliding() {
+                Color::from_rgba(255. / 255., 140. / 255., 158. / 255., 1.0) // Red for collision
             } else {
-                line.set_default_color(Color::from_rgba(
-                    // 255. / 255.,
-                    // 140. / 255.,
-                    // 158. / 255.,
-                    0.0, 1.0, 0.0, 1.0,
-                ));
-            }
+                Color::from_rgba(0.0, 1.0, 0.0, 1.0) // Green otherwise
+            });
         }
 
         self.returns.push(ray_returns);
