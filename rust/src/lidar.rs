@@ -86,6 +86,7 @@ pub struct Lidar {
     rays: Vec<Gd<RayCast2D>>,
     lines: Vec<Gd<Line2D>>,
     path: Vec<Vector2>,
+    parsed_args: HashMap<String, String>,
     path_idx: usize,
     angle: f32,
     target_angle: f32,
@@ -110,6 +111,7 @@ impl INode2D for Lidar {
             rays: Vec::<Gd<RayCast2D>>::new(),
             lines: Vec::<Gd<Line2D>>::new(),
             path: Vec::<Vector2>::new(),
+            parsed_args: HashMap::new(),
             path_idx: 0,
             angle: 0.0,
             target_angle: 0.0,
@@ -132,12 +134,12 @@ impl INode2D for Lidar {
         ));
 
         let args: Vec<String> = env::args().collect();
-        let parsed_args = parse_args(args);
+        self.parsed_args = parse_args(args);
 
-        godot_print!("Command-line arguments: {:?}", parsed_args);
+        godot_print!("Command-line arguments: {:?}", self.parsed_args);
 
-        if let Some(label) = parsed_args.get("label") {
-            self.add_center_label(label, 1024., 1024.);
+        if let Some(label) = self.parsed_args.get("label") {
+            self.add_center_label(&label.clone(), 1024., 1024.);
         }
 
         let geom = self.generate_geometry();
@@ -412,12 +414,14 @@ impl Lidar {
             ray.set_collision_mask_value(1, true);
             ray.set_enabled(true);
 
-            let mut line = Line2D::new_alloc();
-            line.set_width(3.0);
-            line.add_point(ray.get_position());
-            line.add_point(ray.get_position());
-            self.base_mut().add_child(line.clone());
-            self.lines.push(line.clone());
+            if !self.parsed_args.contains_key("suppress_lines") {
+                let mut line = Line2D::new_alloc();
+                line.set_width(3.0);
+                line.add_point(ray.get_position());
+                line.add_point(ray.get_position());
+                self.base_mut().add_child(line.clone());
+                self.lines.push(line.clone());
+            }
 
             self.base_mut().add_child(ray.clone());
             self.rays.push(ray.clone());
@@ -465,16 +469,19 @@ impl Lidar {
             ray_returns[[i, 0]] = distance as f64;
             ray_returns[[i, 1]] = ray_angle as f64;
 
-            // Update visual line representation
-            let mut line = self.lines[i].clone();
-            line.clear_points();
-            line.add_point(ray.get_position());
-            line.add_point(collision_point);
-            line.set_default_color(if ray.is_colliding() {
-                Color::from_rgba(255. / 255., 140. / 255., 158. / 255., 1.0) // Red for collision
-            } else {
-                Color::from_rgba(0.0, 1.0, 0.0, 1.0) // Green otherwise
-            });
+            if !self.parsed_args.contains_key("suppress_lines") {
+                // Update visual line representation
+                let mut line = self.lines[i].clone();
+                line.clear_points();
+                line.add_point(ray.get_position());
+                line.add_point(collision_point);
+                line.set_default_color(if ray.is_colliding() {
+                    Color::from_rgba(255. / 255., 140. / 255., 158. / 255., 1.0)
+                // Red for collision
+                } else {
+                    Color::from_rgba(0.0, 1.0, 0.0, 1.0) // Green otherwise
+                });
+            }
         }
 
         self.returns.push(ray_returns);
