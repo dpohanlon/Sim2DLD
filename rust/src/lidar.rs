@@ -153,6 +153,20 @@ impl INode2D for Lidar {
         godot_print!("Path length: {}", self.path.len());
         godot_print!("Path (0): {}", self.path[0]);
 
+        // Copy path into array2 for serialization
+        let path_array = Array2::from_shape_vec(
+            (self.path.len(), 2),
+            self.path.iter().flat_map(|v| vec![v.x, v.y]).collect(),
+        )
+        .unwrap();
+
+        // Serialize the path to a JSON file
+        let serializable_path = SerializableArray2 { array: path_array };
+
+        let count = LIDAR_COUNT.lock().unwrap(); // Lock the mutex before modifying
+        let filename = format!("{}/lidar_path_{}.json", self.out_dir, count);
+        let _ = write_to_json(&filename, &serializable_path);
+
         let points = self.path.clone();
         for point in points.iter() {
             self.draw_point(
@@ -205,7 +219,7 @@ impl INode2D for Lidar {
 
                     let mut count = LIDAR_COUNT.lock().unwrap(); // Lock the mutex before modifying
 
-                    let filename = format!("{}/lidar_return_{}.json", self.out_dir, count);
+                    let filename = format!("{}/lidar_returns_{}.json", self.out_dir, count);
 
                     let _ = write_to_json(&filename, &serializable_arrays).unwrap();
 
