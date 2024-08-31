@@ -1,10 +1,13 @@
+// Run with .command file
+
 mod random_geometry;
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use crate::lidar::random_geometry::RandomGeometryGenerator;
 use godot::classes::{
-    AStar2D, CollisionPolygon2D, Geometry2D, INode2D, Line2D, Node2D, Polygon2D, RayCast2D,
+    AStar2D, CollisionPolygon2D, Geometry2D, INode2D, Label, Line2D, Node2D, Polygon2D, RayCast2D,
     RenderingServer, StaticBody2D,
 };
 use godot::prelude::*;
@@ -16,6 +19,32 @@ use std::fs::File;
 use std::io::BufWriter;
 
 use std::{thread, time};
+
+fn parse_args(args: Vec<String>) -> HashMap<String, String> {
+    let mut args_map = HashMap::new();
+
+    let mut iter = args.iter().peekable();
+    while let Some(arg) = iter.next() {
+        if arg.starts_with("--") {
+            let key = arg.trim_start_matches('-').to_string();
+
+            // Check if the next argument exists and does not start with '--' (meaning it's a value)
+            if let Some(next_arg) = iter.peek() {
+                if !next_arg.starts_with("--") {
+                    args_map.insert(key, iter.next().unwrap().clone());
+                } else {
+                    // Insert the key with an empty value if it's a flag
+                    args_map.insert(key, String::new());
+                }
+            } else {
+                // Insert the key with an empty value if it's a flag
+                args_map.insert(key, String::new());
+            }
+        }
+    }
+
+    args_map
+}
 
 // Wrap Array2 in a new struct
 struct SerializableArray2<T> {
@@ -63,6 +92,8 @@ pub struct Lidar {
     slewing: bool,
     slew_rate: f32,
     returns: Vec<Array2<f64>>,
+    out_dir: String,
+    n_iterations: u32,
 }
 
 // Static variable declaration outside the struct and impl block
@@ -83,9 +114,10 @@ impl INode2D for Lidar {
             angle: 0.0,
             target_angle: 0.0,
             slewing: false,
-            // slew_rate: 90.0,
-            slew_rate: 10.0,
+            slew_rate: 30.0, // degrees per second
             returns: Vec::<Array2<f64>>::new(),
+            out_dir: String::from("lidar_out"),
+            n_iterations: 10,
         }
     }
 
@@ -100,7 +132,13 @@ impl INode2D for Lidar {
         ));
 
         let args: Vec<String> = env::args().collect();
-        godot_print!("Command-line arguments: {:?}", args);
+        let parsed_args = parse_args(args);
+
+        godot_print!("Command-line arguments: {:?}", parsed_args);
+
+        if let Some(label) = parsed_args.get("label") {
+            self.add_center_label(label, 1024., 1024.);
+        }
 
         let geom = self.generate_geometry();
 
@@ -167,11 +205,16 @@ impl INode2D for Lidar {
 
                     let mut count = LIDAR_COUNT.lock().unwrap(); // Lock the mutex before modifying
 
-                    let filename = format!("test_{}.json", count);
+                    let filename = format!("{}/lidar_return_{}.json", self.out_dir, count);
 
                     let _ = write_to_json(&filename, &serializable_arrays).unwrap();
 
                     *count += 1;
+
+                    if *count >= self.n_iterations {
+                        godot_print!("Finished {} iterations", self.n_iterations);
+                        self.base_mut().get_tree().unwrap().quit();
+                    }
                 }
 
                 self.base_mut().get_tree().unwrap().reload_current_scene();
@@ -216,6 +259,22 @@ impl Lidar {
         ];
         polygon.set_polygon(vertices.into());
         polygon
+    }
+
+    fn add_center_label(&mut self, text: &str, arena_width: f32, arena_height: f32) {
+        let mut label = Label::new_alloc();
+        label.set_text(text.into());
+
+        // Center the label within the arena
+        label.set_anchor(Side::LEFT, 0.5); // Center horizontally
+        label.set_anchor(Side::TOP, 0.5); // Center vertically
+
+        // Set the label's position to the center of the arena
+        let position = Vector2::new(arena_width / 2.0, arena_height / 2.0);
+        label.set_position(position);
+
+        // Add the label as a child to the current node
+        self.base_mut().add_child(label);
     }
 
     fn create_astar_grid(&mut self) {
