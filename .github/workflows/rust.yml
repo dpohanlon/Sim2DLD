@@ -31,8 +31,8 @@ jobs:
         mv Godot_v4.3-stable_export_templates.tpz Godot_v4.3-stable_export_templates.zip
         unzip Godot_v4.3-stable_export_templates.zip
         mkdir -p /home/runner/.local/share/godot/export_templates/4.3.stable/
-        mv Godot_v4.3-stable_export_templates/linux_debug.x86_64 /home/runner/.local/share/godot/export_templates/4.3.stable/linux_debug.x86_64
-        mv Godot_v4.3-stable_export_templates/linux_release.x86_64 /home/runner/.local/share/godot/export_templates/4.3.stable/linux_release.x86_64
+        mv templates/linux_debug.x86_64 /home/runner/.local/share/godot/export_templates/4.3.stable/linux_debug.x86_64
+        mv templates/linux_release.x86_64 /home/runner/.local/share/godot/export_templates/4.3.stable/linux_release.x86_64
     - name: Export Godot project
       run: |
         cd godot
