@@ -28,6 +28,6 @@ jobs:
     - name: Export Godot project
       run: |
         cd godot
-        ../godot43/Godot_v4.3-stable_linux.x86_64 --headless --export-debug "linux" lidar.app
+        ../godot43/Godot_v4.3-stable_linux.x86_64 --headless --export-debug "Linux" lidar.app
     - name: Run
       run: ./lidar.command --headless --n_iterations 1
