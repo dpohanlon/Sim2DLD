@@ -41,4 +41,5 @@ jobs:
     - name: Run
       run: |
         ls -lth
+        mkdir lidar_out
         godot/lidar.app --headless --n_iterations 1
