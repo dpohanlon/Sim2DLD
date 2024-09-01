@@ -1,7 +1,7 @@
 <p align="center">
   <img width="400" height="400" src="https://github.com/dpohanlon/Sim2DLD/blob/main/assets/lidar.png">
   <br>
-  Two dimensional LIDAR simulation.
+  Two dimensional LIDAR simulation in Godot.
 </p>
 
 Installation
