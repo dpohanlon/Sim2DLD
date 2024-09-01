@@ -1,100 +1,35 @@
 // Run with .command file
 
+mod argument_parser;
+mod lidar_state;
 mod random_geometry;
+mod serializer;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 
 use crate::lidar::random_geometry::RandomGeometryGenerator;
+use crate::lidar::serializer::write_to_json;
+use crate::lidar::serializer::SerializableArray2;
 use godot::classes::{
     AStar2D, CollisionPolygon2D, Geometry2D, INode2D, Label, Line2D, Node2D, Polygon2D, RayCast2D,
     RenderingServer, StaticBody2D,
 };
 use godot::prelude::*;
 use ndarray::Array2;
-use serde::ser::{Serialize, Serializer};
-use serde_json::to_writer;
 use std::env;
-use std::fs::File;
-use std::io::BufWriter;
 
 use std::{thread, time};
-
-fn parse_args(args: Vec<String>) -> HashMap<String, String> {
-    let mut args_map = HashMap::new();
-
-    let mut iter = args.iter().peekable();
-    while let Some(arg) = iter.next() {
-        if arg.starts_with("--") {
-            let key = arg.trim_start_matches('-').to_string();
-
-            // Check if the next argument exists and does not start with '--' (meaning it's a value)
-            if let Some(next_arg) = iter.peek() {
-                if !next_arg.starts_with("--") {
-                    args_map.insert(key, iter.next().unwrap().clone());
-                } else {
-                    // Insert the key with an empty value if it's a flag
-                    args_map.insert(key, String::new());
-                }
-            } else {
-                // Insert the key with an empty value if it's a flag
-                args_map.insert(key, String::new());
-            }
-        }
-    }
-
-    args_map
-}
-
-// Wrap Array2 in a new struct
-struct SerializableArray2<T> {
-    array: Array2<T>,
-}
-
-// Implement Serialize for the wrapper struct
-impl<T: Serialize + std::clone::Clone> Serialize for SerializableArray2<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // Convert Array2 into a serializable Vec<Vec<T>>
-        let vec_of_vecs: Vec<Vec<T>> = self
-            .array
-            .rows()
-            .into_iter()
-            .map(|row| row.to_vec())
-            .collect();
-
-        // Serialize the Vec<Vec<T>>
-        vec_of_vecs.serialize(serializer)
-    }
-}
-
-// A function to write a serializable object to a JSON file
-fn write_to_json<T: Serialize>(filename: &str, data: &T) -> std::io::Result<()> {
-    let file = File::create(filename)?; // Open a file in write mode
-    let writer = BufWriter::new(file); // Create a buffered writer for efficient writing
-    to_writer(writer, data)?; // Serialize the data to JSON and write it to the file
-    Ok(())
-}
 
 #[derive(GodotClass)]
 #[class(base=Node2D)]
 pub struct Lidar {
     base: Base<Node2D>,
     _arena: Gd<Polygon2D>,
-    rays: Vec<Gd<RayCast2D>>,
-    lines: Vec<Gd<Line2D>>,
-    path: Vec<Vector2>,
     parsed_args: HashMap<String, String>,
-    path_idx: usize,
-    angle: f32,
-    target_angle: f32,
-    slewing: bool,
-    slew_rate: f32,
-    returns: Vec<Array2<f64>>,
     out_dir: String,
     n_iterations: u32,
+    state: lidar_state::LidarState, // Replace individual state variables
 }
 
 // Static variable declaration outside the struct and impl block
@@ -108,18 +43,10 @@ impl INode2D for Lidar {
         Self {
             base,
             _arena: polygon,
-            rays: Vec::<Gd<RayCast2D>>::new(),
-            lines: Vec::<Gd<Line2D>>::new(),
-            path: Vec::<Vector2>::new(),
             parsed_args: HashMap::new(),
-            path_idx: 0,
-            angle: 0.0,
-            target_angle: 0.0,
-            slewing: false,
-            slew_rate: 30.0, // degrees per second
-            returns: Vec::<Array2<f64>>::new(),
             out_dir: String::from("lidar_out"),
             n_iterations: 10,
+            state: lidar_state::LidarState::new(), // Initialize LidarState
         }
     }
 
@@ -134,7 +61,8 @@ impl INode2D for Lidar {
         ));
 
         let args: Vec<String> = env::args().collect();
-        self.parsed_args = parse_args(args);
+
+        self.parsed_args = argument_parser::parse_args(args);
 
         godot_print!("Command-line arguments: {:?}", self.parsed_args);
 
@@ -151,25 +79,29 @@ impl INode2D for Lidar {
         self.create_astar_grid();
 
         let path = self.calculate_path(&geom);
-        self.path = path;
-        godot_print!("Path length: {}", self.path.len());
-        godot_print!("Path (0): {}", self.path[0]);
+        self.state.path = path;
+        godot_print!("Path length: {}", self.state.path.len());
+        godot_print!("Path (0): {}", self.state.path[0]);
 
         // Copy path into array2 for serialization
         let path_array = Array2::from_shape_vec(
-            (self.path.len(), 2),
-            self.path.iter().flat_map(|v| vec![v.x, v.y]).collect(),
+            (self.state.path.len(), 2),
+            self.state
+                .path
+                .iter()
+                .flat_map(|v| vec![v.x, v.y])
+                .collect(),
         )
         .unwrap();
 
         // Serialize the path to a JSON file
-        let serializable_path = SerializableArray2 { array: path_array };
+        let serializable_path = serializer::SerializableArray2 { array: path_array };
 
         let count = LIDAR_COUNT.lock().unwrap(); // Lock the mutex before modifying
         let filename = format!("{}/lidar_path_{}.json", self.out_dir, count);
-        let _ = write_to_json(&filename, &serializable_path);
+        let _ = serializer::write_to_json(&filename, &serializable_path);
 
-        let points = self.path.clone();
+        let points = self.state.path.clone();
         for point in points.iter() {
             self.draw_point(
                 &point,
@@ -186,33 +118,34 @@ impl INode2D for Lidar {
     }
 
     fn process(&mut self, delta: f64) {
-        if self.slewing {
+        if self.state.slewing {
             godot_print!(
                 "Slewing, target {}, angle {}",
-                self.target_angle,
-                self.angle
+                self.state.target_angle,
+                self.state.angle
             );
             // If slewing, calculate the rotation amount based on the slew rate and time delta
-            let rotation_speed = self.slew_rate * delta as f32; // degrees per frame based on time delta
-            let angle_diff = self.target_angle - self.angle;
+            let rotation_speed = self.state.slew_rate * delta as f32; // degrees per frame based on time delta
+            let angle_diff = self.state.target_angle - self.state.angle;
             let rotation_step = angle_diff.signum() * rotation_speed.min(angle_diff.abs());
 
             // Update the Lidar's angle
-            self.angle += rotation_step;
+            self.state.angle += rotation_step;
 
             // Check if we have reached the target angle
-            if (self.target_angle - self.angle).abs() < 1E-4 {
-                self.angle = self.target_angle; // Snap to target angle
-                self.slewing = false; // Finished slewing
+            if (self.state.target_angle - self.state.angle).abs() < 1E-4 {
+                self.state.angle = self.state.target_angle; // Snap to target angle
+                self.state.slewing = false; // Finished slewing
             }
 
             // Update rays' positions and orientations
             self.update_rays_rotation();
         } else {
             // If not slewing, handle the movement along the path
-            if self.path.is_empty() || self.path_idx >= self.path.len() - 1 {
-                if !self.path.is_empty() {
-                    let serializable_arrays: Vec<SerializableArray2<f64>> = self
+            if self.state.path.is_empty() || self.state.path_idx >= self.state.path.len() - 1 {
+                if !self.state.path.is_empty() {
+                    let serializable_arrays: Vec<serializer::SerializableArray2<f64>> = self
+                        .state
                         .returns
                         .clone()
                         .into_iter()
@@ -237,9 +170,9 @@ impl INode2D for Lidar {
                 return;
             }
 
-            let loc = self.path[self.path_idx];
-            let prev_loc = if self.path_idx > 0 {
-                self.path[self.path_idx - 1]
+            let loc = self.state.path[self.state.path_idx];
+            let prev_loc = if self.state.path_idx > 0 {
+                self.state.path[self.state.path_idx - 1]
             } else {
                 loc
             };
@@ -247,14 +180,14 @@ impl INode2D for Lidar {
             let desired_angle = self.get_path_angle(prev_loc, loc);
 
             // Check if the Lidar needs to rotate to face the new direction
-            if (self.angle - desired_angle).abs() > 1E-4 {
+            if (self.state.angle - desired_angle).abs() > 1E-4 {
                 // Start slewing to the desired angle
-                self.slewing = true;
-                self.target_angle = desired_angle;
+                self.state.slewing = true;
+                self.state.target_angle = desired_angle;
             } else {
                 // Move to the next point in the path
                 self.update_rays_and_lines(loc, prev_loc);
-                self.path_idx += 1;
+                self.state.path_idx += 1;
             }
 
             // Optional: introduce a delay for testing
@@ -420,24 +353,24 @@ impl Lidar {
                 line.add_point(ray.get_position());
                 line.add_point(ray.get_position());
                 self.base_mut().add_child(line.clone());
-                self.lines.push(line.clone());
+                self.state.lines.push(line.clone());
             }
 
             self.base_mut().add_child(ray.clone());
-            self.rays.push(ray.clone());
+            self.state.rays.push(ray.clone());
         }
     }
 
     fn update_rays_and_lines(&mut self, loc: Vector2, prev_loc: Vector2) {
         // Calculate change in angle
         let angle = self.get_path_angle(prev_loc, loc);
-        let d_angle = angle - self.angle;
-        self.angle = angle; // Update Lidar heading angle
+        let d_angle = angle - self.state.angle;
+        self.state.angle = angle; // Update Lidar heading angle
 
         // Ensure rays are sufficiently long and have correct target positions
         let mut ray_returns: Array2<f64> = Array2::zeros((360, 2));
 
-        for (i, ray) in self.rays.clone().iter_mut().enumerate() {
+        for (i, ray) in self.state.rays.clone().iter_mut().enumerate() {
             // Get the current position of the ray
             let ray_pos = ray.get_position();
             let target_pos = ray.get_target_position();
@@ -471,7 +404,7 @@ impl Lidar {
 
             if !self.parsed_args.contains_key("suppress_lines") {
                 // Update visual line representation
-                let mut line = self.lines[i].clone();
+                let mut line = self.state.lines[i].clone();
                 line.clear_points();
                 line.add_point(ray.get_position());
                 line.add_point(collision_point);
@@ -484,7 +417,7 @@ impl Lidar {
             }
         }
 
-        self.returns.push(ray_returns);
+        self.state.returns.push(ray_returns);
     }
 
     fn get_path_angle(&self, loc: Vector2, next_loc: Vector2) -> f32 {
@@ -493,10 +426,10 @@ impl Lidar {
     }
 
     fn update_rays_rotation(&mut self) {
-        let loc = self.path[self.path_idx]; // Get Lidar's global position
-        let rotation_radians = self.angle.to_radians();
+        let loc = self.state.path[self.state.path_idx]; // Get Lidar's global position
+        let rotation_radians = self.state.angle.to_radians();
 
-        for ray in self.rays.iter_mut() {
+        for ray in self.state.rays.iter_mut() {
             let ray_position = ray.get_position();
             let offset = ray.get_target_position() - ray_position;
 

@@ -1,5 +1,4 @@
 mod lidar;
-mod player;
 
 use godot::prelude::*;
 
