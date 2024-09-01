@@ -18,5 +18,16 @@ jobs:
     - uses: actions/checkout@v4
     - name: Build
       run: cargo build --verbose --manifest-path=rust/Cargo.toml
-    - name: Run tests
+    - name: Run rust tests
       run: cargo test --verbose --manifest-path=rust/Cargo.toml
+    - name: Download Godot Engine
+      run: |
+        wget https://downloads.tuxfamily.org/godotengine/4.3/Godot_v4.3-stable_linux.x86_64.zip
+        unzip Godot_v4.3-stable_linux.x86_64.zip -d godot43
+        chmod +x godot/Godot_v4.3-stable_linux.x86_64
+    - name: Export Godot project
+      run: |
+        cd godot
+        ../godot43/Godot_v4.3-stable_linux.x86_64 --headless --export-debug "linux" lidar.app
+    - name: Run
+      run: ./lidar.command --headless --n_iterations 1
