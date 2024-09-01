@@ -27,7 +27,7 @@ jobs:
         chmod +x godot43/Godot_v4.3-stable_linux.x86_64
     - name: Get export templates
       run: |
-        wget https://github.com/godotengine/godot/releases/download/4.3-stable/
+        wget https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz
         mv Godot_v4.3-stable_export_templates.tpz Godot_v4.3-stable_export_templates.zip
         unzip Godot_v4.3-stable_export_templates.zip
         mkdir -p /home/runner/.local/share/godot/export_templates/4.3.stable/
