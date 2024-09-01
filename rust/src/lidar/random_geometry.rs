@@ -20,7 +20,7 @@ impl INode2D for RandomGeometryGenerator {
     }
 
     fn ready(&mut self) {
-        const NUM_SHAPES: i32 = 10;
+        const NUM_SHAPES: i32 = 100;
         let screen_width = 1024.0;
         let screen_height = 1024.0;
 
@@ -75,7 +75,7 @@ impl RandomGeometryGenerator {
         let mut polygon = Polygon2D::new_alloc();
 
         // Define the size of the square
-        let size = rand_range(50.0, 300.0);
+        let size = rand_range(10.0, 100.0);
 
         // Define the vertices for the square
         let mut vertices = vec![
@@ -114,7 +114,7 @@ impl RandomGeometryGenerator {
     fn generate_random_circle(&mut self, screen_width: f32, screen_height: f32) -> Gd<Polygon2D> {
         let mut circle = Polygon2D::new_alloc();
 
-        let radius = rand_range(50.0, 250.0);
+        let radius = rand_range(10.0, 100.0);
         let mut polygon = self.create_circle_polygon(radius);
 
         let translation = Vector2::new(
