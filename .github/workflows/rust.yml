@@ -39,4 +39,6 @@ jobs:
         ls -lth 
         ../godot43/Godot_v4.3-stable_linux.x86_64 --headless --export-debug "Linux" lidar.app
     - name: Run
-      run: ./lidar.app --headless --n_iterations 1
+      run: |
+        ls -lth
+        ./lidar.app --headless --n_iterations 1
