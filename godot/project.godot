@@ -10,11 +10,10 @@ config_version=5
 
 [application]
 
-config/name="godot_first"
+config/name="lidar"
 run/main_scene="res://lidar.tscn"
 config/features=PackedStringArray("4.3", "Forward Plus")
 run/max_fps=300
-config/icon="res://icon.svg"
 
 [debug]
 

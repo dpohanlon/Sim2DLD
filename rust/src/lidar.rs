@@ -1,4 +1,4 @@
-// Run with .command file
+// Run with .command file, --headless
 
 mod argument_parser;
 mod lidar_state;
@@ -68,6 +68,10 @@ impl INode2D for Lidar {
 
         if let Some(label) = self.parsed_args.get("label") {
             self.add_center_label(&label.clone(), 1024., 1024.);
+        }
+
+        if let Some(n) = self.parsed_args.get("n_iterations") {
+            self.n_iterations = n.parse().unwrap();
         }
 
         let geom = self.generate_geometry();
