@@ -6,15 +6,10 @@
 
 Installation
 ---
-Install from PyPI
-```bash
-pip install brioche-enrichment
-```
 
-or install from the Github repository
+Check out the GitHub repository
 ```bash
-git clone git@github.com:dpohanlon/brioche.git
-pip install -r requirements.txt .
+git clone https://github.com/dpohanlon/Sim2DLD.git
 ```
 
 Usage
