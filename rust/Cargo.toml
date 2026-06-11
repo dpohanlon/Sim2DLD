@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib"]  # Compile this crate to a dynamic C library.
 
 [dependencies]
-godot = { git = "https://github.com/godot-rust/gdext", branch = "master" }
+godot = { git = "https://github.com/godot-rust/gdext", rev = "7634fe769d1fcb66209586f0b6c06aac40978253" }
 rand = "0.8"
 serde = { version = "1.0.127", features = ["derive"] }
 serde_json = "1.0.127"
