@@ -26,7 +26,7 @@ impl LidarState {
             angle: 0.0,
             target_angle: 0.0,
             slewing: false,
-            slew_rate: 30.0, // degrees per second
+            slew_rate: 3600.0, // degrees per second
             returns: Vec::<Array2<f64>>::new(),
         }
     }
