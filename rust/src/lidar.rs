@@ -35,6 +35,7 @@ const ARENA_SIZE: f32 = 1024.0;
 const GRID_SIZE: i64 = 100;
 const N_RAYS: usize = 360;
 const RAY_LENGTH: f32 = 100000.0;
+const MAX_GEOMETRY_ATTEMPTS_PER_ITERATION: u32 = 100;
 
 #[godot_api]
 impl INode2D for Lidar {
@@ -62,6 +63,9 @@ impl INode2D for Lidar {
             1.0,
         ));
 
+        let arena = self._arena.clone();
+        self.base_mut().add_child(arena);
+
         let args: Vec<String> = env::args().collect();
         self.parsed_args = argument_parser::parse_args(args);
 
@@ -71,24 +75,6 @@ impl INode2D for Lidar {
             self.base_mut().get_tree().unwrap().quit();
             return;
         }
-
-        if let Some(out_dir) = self.parsed_args.get("out_dir") {
-            self.out_dir = out_dir.clone();
-        }
-
-        let out_dir_path = PathBuf::from(&self.out_dir);
-        let out_dir_abs = if out_dir_path.is_absolute() {
-            out_dir_path
-        } else {
-            match env::current_dir() {
-                Ok(cwd) => cwd.join(out_dir_path),
-                Err(err) => {
-                    godot_print!("Failed to determine current directory: {}", err);
-                    self.base_mut().get_tree().unwrap().quit();
-                    return;
-                }
-            }
-        };
 
         if let Some(label) = self.parsed_args.get("label") {
             self.add_center_label(&label.clone(), ARENA_SIZE, ARENA_SIZE);
@@ -105,26 +91,47 @@ impl INode2D for Lidar {
             }
         }
 
-        godot_print!("Output directory ready: '{}'", self.out_dir);
+        let mut selected_geom: Option<Gd<RandomGeometryGenerator>> = None;
+        let mut selected_path: Vec<Vector2> = Vec::new();
 
-        let geom = self.generate_geometry();
+        for attempt in 1..=MAX_GEOMETRY_ATTEMPTS_PER_ITERATION {
+            let geom = self.generate_geometry();
 
-        self.base_mut().add_child(geom.clone());
-        let poly_len = geom.bind().polygons.len();
-        godot_print!("I am LIDAR and I have {} polygons", poly_len);
+            let poly_len = geom.bind().polygons.len();
+            godot_print!(
+                "I am LIDAR and I have {} polygons, geometry attempt {}",
+                poly_len,
+                attempt
+            );
 
-        let path = self.calculate_path(&geom);
-        self.state.path = path;
+            let path = self.calculate_path(&geom);
 
-        godot_print!("Path length: {}", self.state.path.len());
+            godot_print!("Path length: {}", path.len());
 
-        if self.state.path.is_empty() {
-            godot_print!("No path found; skipping geometry seed");
-            self.base_mut().get_tree().unwrap().reload_current_scene();
-            return;
+            if path.is_empty() {
+                godot_print!("No path found; skipping geometry seed");
+                continue;
+            }
+
+            selected_geom = Some(geom);
+            selected_path = path;
+            break;
         }
 
+        let Some(geom) = selected_geom else {
+            godot_print!(
+                "No valid geometry found after {} attempts; stopping",
+                MAX_GEOMETRY_ATTEMPTS_PER_ITERATION
+            );
+            self.base_mut().get_tree().unwrap().quit();
+            return;
+        };
+
+        self.state.path = selected_path;
+
         godot_print!("Path (0): {}", self.state.path[0]);
+
+        self.base_mut().add_child(geom.clone());
 
         let path_array = Array2::from_shape_vec(
             (self.state.path.len(), 2),
@@ -141,10 +148,15 @@ impl INode2D for Lidar {
         let count = LIDAR_COUNT.load(Ordering::Relaxed);
         let filename = format!("{}/lidar_path_{}.json", self.out_dir, count);
 
-        if let Err(err) = serializer::write_to_json(&filename, &serializable_path) {
-            godot_print!("Failed to write '{}': {}", filename, err);
-            self.base_mut().get_tree().unwrap().quit();
-            return;
+        match serializer::write_to_json(&filename, &serializable_path) {
+            Ok(()) => {
+                godot_print!("Wrote path output '{}'", filename);
+            }
+            Err(err) => {
+                godot_print!("Failed to write '{}': {}", filename, err);
+                self.base_mut().get_tree().unwrap().quit();
+                return;
+            }
         }
 
         let points = self.state.path.clone();
@@ -214,21 +226,47 @@ impl INode2D for Lidar {
             }
 
             let loc = self.state.path[self.state.path_idx];
-            let prev_loc = if self.state.path_idx > 0 {
-                self.state.path[self.state.path_idx - 1]
-            } else {
-                loc
-            };
 
-            let desired_angle = Self::path_angle(prev_loc, loc);
+            if self.state.slewing {
+                let rotation_speed = self.state.slew_rate.to_radians() * delta as f32;
+                let angle_diff = Self::angle_diff(self.state.angle, self.state.target_angle);
+                let rotation_step = angle_diff.signum() * rotation_speed.min(angle_diff.abs());
 
-            if (self.state.angle - desired_angle).abs() > 1E-4 {
+                self.state.angle += rotation_step;
+
+                if Self::angle_diff(self.state.angle, self.state.target_angle).abs() < 1E-4 {
+                    self.state.angle = self.state.target_angle;
+                    self.state.slewing = false;
+                }
+
+                self.update_rays_and_lines(loc, self.state.angle);
+
+                if !self.state.slewing {
+                    self.state.path_idx += 1;
+                }
+
+                return;
+            }
+
+            let next_idx = self.state.path_idx + 1;
+
+            if next_idx >= self.state.path.len() {
+                return;
+            }
+
+            let next_loc = self.state.path[next_idx];
+            let desired_angle = Self::path_angle(loc, next_loc);
+
+            let angle_diff = Self::angle_diff(self.state.angle, desired_angle);
+
+            if angle_diff.abs() > 1E-4 {
                 self.state.slewing = true;
                 self.state.target_angle = desired_angle;
-            } else {
-                self.update_rays_and_lines(loc, prev_loc);
-                self.state.path_idx += 1;
+                return;
             }
+
+            self.update_rays_and_lines(loc, self.state.angle);
+            self.state.path_idx += 1;
         }
     }
 }
@@ -436,8 +474,21 @@ impl Lidar {
         }
     }
 
-    fn update_rays_and_lines(&mut self, loc: Vector2, prev_loc: Vector2) {
-        let angle = Self::path_angle(prev_loc, loc);
+    fn angle_diff(from: f32, to: f32) -> f32 {
+        let mut diff = to - from;
+
+        while diff > std::f32::consts::PI {
+            diff -= std::f32::consts::TAU;
+        }
+
+        while diff < -std::f32::consts::PI {
+            diff += std::f32::consts::TAU;
+        }
+
+        diff
+    }
+
+    fn update_rays_and_lines(&mut self, loc: Vector2, angle: f32) {
         self.state.angle = angle;
 
         let draw_lines = !self.parsed_args.contains_key("suppress_lines");
@@ -466,10 +517,9 @@ impl Lidar {
             };
 
             let distance = (collision_point - origin).length();
-            let return_angle = Self::path_angle(origin, collision_point);
 
             ray_returns[[i, 0]] = distance as f64;
-            ray_returns[[i, 1]] = return_angle as f64;
+            ray_returns[[i, 1]] = ray_angle as f64;
 
             if draw_lines {
                 let mut line = lines[i].clone();
