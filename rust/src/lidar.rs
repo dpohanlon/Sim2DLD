@@ -4,7 +4,8 @@ mod random_geometry;
 mod serializer;
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::env;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use crate::lidar::random_geometry::RandomGeometryGenerator;
 use crate::lidar::serializer::write_to_json;
@@ -15,8 +16,6 @@ use godot::classes::{
 };
 use godot::prelude::*;
 use ndarray::Array2;
-use std::env;
-use std::path::PathBuf;
 
 #[derive(GodotClass)]
 #[class(base=Node2D)]
@@ -30,6 +29,7 @@ pub struct Lidar {
 }
 
 static LIDAR_COUNT: AtomicU32 = AtomicU32::new(0);
+static RUN_SEED: AtomicU64 = AtomicU64::new(0);
 
 const ARENA_SIZE: f32 = 1024.0;
 const GRID_SIZE: i64 = 100;
@@ -91,11 +91,24 @@ impl INode2D for Lidar {
             }
         }
 
+        let base_seed = self.run_seed();
+        let iteration = LIDAR_COUNT.load(Ordering::Relaxed);
+
+        godot_print!("Run seed: {}", base_seed);
+
         let mut selected_geom: Option<Gd<RandomGeometryGenerator>> = None;
         let mut selected_path: Vec<Vector2> = Vec::new();
 
         for attempt in 1..=MAX_GEOMETRY_ATTEMPTS_PER_ITERATION {
-            let geom = self.generate_geometry();
+            let geometry_seed = Self::mix_seed(
+                base_seed
+                    ^ ((iteration as u64).wrapping_mul(0x9E3779B97F4A7C15))
+                    ^ attempt as u64,
+            );
+
+            godot_print!("Geometry seed: {}", geometry_seed);
+
+            let geom = self.generate_geometry(geometry_seed);
 
             let poly_len = geom.bind().polygons.len();
             godot_print!(
@@ -143,7 +156,7 @@ impl INode2D for Lidar {
         )
         .unwrap();
 
-        let serializable_path = serializer::SerializableArray2 { array: path_array };
+        let serializable_path = SerializableArray2 { array: path_array };
 
         let count = LIDAR_COUNT.load(Ordering::Relaxed);
         let filename = format!("{}/lidar_path_{}.json", self.out_dir, count);
@@ -162,7 +175,7 @@ impl INode2D for Lidar {
         let points = self.state.path.clone();
         for point in points.iter() {
             self.draw_point(
-                &point,
+                point,
                 Color::from_rgba(255. / 255., 78. / 255., 136. / 255., 1.0),
             );
         }
@@ -174,100 +187,75 @@ impl INode2D for Lidar {
     }
 
     fn process(&mut self, delta: f64) {
-        if self.state.slewing {
-            godot_print!(
-                "Slewing, target {}, angle {}",
-                self.state.target_angle,
-                self.state.angle
-            );
+        if self.state.path.is_empty() || self.state.path_idx >= self.state.path.len() - 1 {
+            if !self.state.path.is_empty() {
+                let count = LIDAR_COUNT.fetch_add(1, Ordering::Relaxed);
 
+                let returns = std::mem::take(&mut self.state.returns);
+                let serializable_arrays: Vec<serializer::SerializableArray2<f64>> = returns
+                    .into_iter()
+                    .map(|array| SerializableArray2 { array })
+                    .collect();
+
+                let filename = format!("{}/lidar_returns_{}.json", self.out_dir, count);
+
+                if let Err(err) = write_to_json(&filename, &serializable_arrays) {
+                    godot_print!("Failed to write '{}': {}", filename, err);
+                    self.base_mut().get_tree().unwrap().quit();
+                    return;
+                }
+
+                godot_print!("Wrote returns output '{}'", filename);
+
+                let completed = count + 1;
+
+                if completed >= self.n_iterations {
+                    godot_print!("Finished {} iterations", self.n_iterations);
+                    self.base_mut().get_tree().unwrap().quit();
+                    return;
+                }
+            }
+
+            self.base_mut().get_tree().unwrap().reload_current_scene();
+            return;
+        }
+
+        let loc = self.state.path[self.state.path_idx];
+
+        if self.state.slewing {
             let rotation_speed = self.state.slew_rate.to_radians() * delta as f32;
-            let angle_diff = self.state.target_angle - self.state.angle;
+            let angle_diff = Self::angle_diff(self.state.angle, self.state.target_angle);
             let rotation_step = angle_diff.signum() * rotation_speed.min(angle_diff.abs());
 
             self.state.angle += rotation_step;
 
-            if (self.state.target_angle - self.state.angle).abs() < 1E-4 {
+            if Self::angle_diff(self.state.angle, self.state.target_angle).abs() < 1E-4 {
                 self.state.angle = self.state.target_angle;
                 self.state.slewing = false;
             }
 
-            self.update_rays_rotation();
-        } else {
-            if self.state.path.is_empty() || self.state.path_idx >= self.state.path.len() - 1 {
-                if !self.state.path.is_empty() {
-                    let count = LIDAR_COUNT.fetch_add(1, Ordering::Relaxed);
-
-                    let returns = std::mem::take(&mut self.state.returns);
-                    let serializable_arrays: Vec<serializer::SerializableArray2<f64>> = returns
-                        .into_iter()
-                        .map(|array| SerializableArray2 { array })
-                        .collect();
-
-                    let filename = format!("{}/lidar_returns_{}.json", self.out_dir, count);
-
-                    if let Err(err) = write_to_json(&filename, &serializable_arrays) {
-                        godot_print!("Failed to write '{}': {}", filename, err);
-                        self.base_mut().get_tree().unwrap().quit();
-                        return;
-                    }
-
-                    let completed = count + 1;
-
-                    if completed >= self.n_iterations {
-                        godot_print!("Finished {} iterations", self.n_iterations);
-                        self.base_mut().get_tree().unwrap().quit();
-                        return;
-                    }
-                }
-
-                self.base_mut().get_tree().unwrap().reload_current_scene();
-                return;
-            }
-
-            let loc = self.state.path[self.state.path_idx];
-
-            if self.state.slewing {
-                let rotation_speed = self.state.slew_rate.to_radians() * delta as f32;
-                let angle_diff = Self::angle_diff(self.state.angle, self.state.target_angle);
-                let rotation_step = angle_diff.signum() * rotation_speed.min(angle_diff.abs());
-
-                self.state.angle += rotation_step;
-
-                if Self::angle_diff(self.state.angle, self.state.target_angle).abs() < 1E-4 {
-                    self.state.angle = self.state.target_angle;
-                    self.state.slewing = false;
-                }
-
-                self.update_rays_and_lines(loc, self.state.angle);
-
-                if !self.state.slewing {
-                    self.state.path_idx += 1;
-                }
-
-                return;
-            }
-
-            let next_idx = self.state.path_idx + 1;
-
-            if next_idx >= self.state.path.len() {
-                return;
-            }
-
-            let next_loc = self.state.path[next_idx];
-            let desired_angle = Self::path_angle(loc, next_loc);
-
-            let angle_diff = Self::angle_diff(self.state.angle, desired_angle);
-
-            if angle_diff.abs() > 1E-4 {
-                self.state.slewing = true;
-                self.state.target_angle = desired_angle;
-                return;
-            }
-
             self.update_rays_and_lines(loc, self.state.angle);
-            self.state.path_idx += 1;
+
+            if !self.state.slewing {
+                self.state.path_idx += 1;
+            }
+
+            return;
         }
+
+        let next_idx = self.state.path_idx + 1;
+        let next_loc = self.state.path[next_idx];
+        let desired_angle = Self::path_angle(loc, next_loc);
+        let angle_diff = Self::angle_diff(self.state.angle, desired_angle);
+
+        if angle_diff.abs() > 1E-4 {
+            self.state.slewing = true;
+            self.state.target_angle = desired_angle;
+            return;
+        }
+
+        self.update_rays_and_lines(loc, self.state.angle);
+        self.state.path_idx += 1;
     }
 }
 
@@ -304,12 +292,16 @@ impl Lidar {
         geom: &Gd<RandomGeometryGenerator>,
         geometry2d: &mut Geometry2D,
     ) -> bool {
+        let point = Vector2::new(x, y);
+
         for g in geom.bind().polygons.iter() {
             let poly = g.get_polygon();
-            if geometry2d.is_point_in_polygon(Vector2::new(x, y), poly) {
+
+            if geometry2d.is_point_in_polygon(point, poly) {
                 return true;
             }
         }
+
         false
     }
 
@@ -325,6 +317,78 @@ impl Lidar {
                 let id = i + GRID_SIZE * j;
 
                 if !free[id as usize] {
+                    continue;
+                }
+
+                let di = i - target_i;
+                let dj = j - target_j;
+                let dist = di * di + dj * dj;
+
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_id = Some(id);
+                }
+            }
+        }
+
+        best_id
+    }
+
+    fn nearest_reachable_grid_id(free: &[bool], start_id: i64, target_id: i64) -> Option<i64> {
+        if !free[start_id as usize] {
+            return None;
+        }
+
+        let neighbours: [(i64, i64); 8] = [
+            (-1, 0),
+            (0, -1),
+            (-1, -1),
+            (1, -1),
+            (1, 0),
+            (0, 1),
+            (1, 1),
+            (-1, 1),
+        ];
+
+        let mut visited = vec![false; free.len()];
+        let mut queue = std::collections::VecDeque::new();
+
+        visited[start_id as usize] = true;
+        queue.push_back(start_id);
+
+        while let Some(id) = queue.pop_front() {
+            let i = id % GRID_SIZE;
+            let j = id / GRID_SIZE;
+
+            for (di, dj) in neighbours {
+                let ni = i + di;
+                let nj = j + dj;
+
+                if ni < 0 || ni >= GRID_SIZE || nj < 0 || nj >= GRID_SIZE {
+                    continue;
+                }
+
+                let neighbour_id = ni + GRID_SIZE * nj;
+                let neighbour_idx = neighbour_id as usize;
+
+                if free[neighbour_idx] && !visited[neighbour_idx] {
+                    visited[neighbour_idx] = true;
+                    queue.push_back(neighbour_id);
+                }
+            }
+        }
+
+        let target_i = target_id % GRID_SIZE;
+        let target_j = target_id / GRID_SIZE;
+
+        let mut best_id = None;
+        let mut best_dist = i64::MAX;
+
+        for i in 0..GRID_SIZE {
+            for j in 0..GRID_SIZE {
+                let id = i + GRID_SIZE * j;
+
+                if !visited[id as usize] {
                     continue;
                 }
 
@@ -370,6 +434,8 @@ impl Lidar {
             return Vec::new();
         }
 
+        let neighbours: [(i64, i64); 4] = [(-1, 0), (0, -1), (-1, -1), (1, -1)];
+
         for i in 0..GRID_SIZE {
             for j in 0..GRID_SIZE {
                 let index = i + GRID_SIZE * j;
@@ -378,19 +444,18 @@ impl Lidar {
                     continue;
                 }
 
-                if i > 0 {
-                    let left_index = (i - 1) + GRID_SIZE * j;
+                for (di, dj) in neighbours {
+                    let ni = i + di;
+                    let nj = j + dj;
 
-                    if free[left_index as usize] {
-                        astar.connect_points(index, left_index);
+                    if ni < 0 || ni >= GRID_SIZE || nj < 0 || nj >= GRID_SIZE {
+                        continue;
                     }
-                }
 
-                if j > 0 {
-                    let top_index = i + GRID_SIZE * (j - 1);
+                    let neighbour_index = ni + GRID_SIZE * nj;
 
-                    if free[top_index as usize] {
-                        astar.connect_points(index, top_index);
+                    if free[neighbour_index as usize] {
+                        astar.connect_points(index, neighbour_index);
                     }
                 }
             }
@@ -400,7 +465,7 @@ impl Lidar {
             return Vec::new();
         };
 
-        let Some(end_id) = Self::nearest_free_grid_id(&free, 6290) else {
+        let Some(end_id) = Self::nearest_reachable_grid_id(&free, start_id, 6290) else {
             return Vec::new();
         };
 
@@ -408,13 +473,14 @@ impl Lidar {
 
         let path = astar.get_point_path(start_id, end_id).to_vec();
 
-        if path.is_empty() {
+        if path.len() < 2 {
             godot_print!(
-                "No connected AStar path from {} to {} despite {} free grid points",
+                "No usable AStar path from {} to {} despite {} free grid points",
                 start_id,
                 end_id,
                 free_count
             );
+            return Vec::new();
         }
 
         path
@@ -439,10 +505,8 @@ impl Lidar {
         godot_print!("Geoms: {}", geom.bind().polygons.len());
 
         for poly in geom.bind().polygons.iter() {
-            godot_print!("Adding polygon to static body, {}", poly);
             let mut polygon = CollisionPolygon2D::new_alloc();
             polygon.set_polygon(poly.get_polygon());
-            godot_print!("pol, {}", poly.get_polygon());
             static_body.add_child(polygon);
         }
 
@@ -538,33 +602,13 @@ impl Lidar {
         self.state.returns.push(ray_returns);
     }
 
-    fn get_path_angle(&self, loc: Vector2, next_loc: Vector2) -> f32 {
-        Self::path_angle(loc, next_loc)
-    }
-
     fn path_angle(loc: Vector2, next_loc: Vector2) -> f32 {
         let diff = next_loc - loc;
         diff.angle()
     }
 
-    fn update_rays_rotation(&mut self) {
-        let loc = self.state.path[self.state.path_idx];
-        let angle = self.state.angle;
-
-        for i in 0..self.state.rays.len() {
-            let ray = &mut self.state.rays[i];
-
-            let ray_angle = angle + i as f32 * std::f32::consts::TAU / N_RAYS as f32;
-            let target_position =
-                Vector2::new(RAY_LENGTH * ray_angle.cos(), RAY_LENGTH * ray_angle.sin());
-
-            ray.set_position(loc);
-            ray.set_target_position(target_position);
-        }
-    }
-
-    fn generate_geometry(&mut self) -> Gd<RandomGeometryGenerator> {
-        random_geometry::RandomGeometryGenerator::new()
+    fn generate_geometry(&mut self, seed: u64) -> Gd<RandomGeometryGenerator> {
+        random_geometry::RandomGeometryGenerator::new(seed)
     }
 
     fn configure_output_dir(&mut self) -> bool {
@@ -604,5 +648,37 @@ impl Lidar {
         godot_print!("Saving lidar output to '{}'", self.out_dir);
 
         true
+    }
+
+    fn run_seed(&self) -> u64 {
+        if let Some(seed) = self.parsed_args.get("seed").and_then(|s| s.parse::<u64>().ok()) {
+            return seed;
+        }
+
+        let existing = RUN_SEED.load(Ordering::Relaxed);
+
+        if existing != 0 {
+            return existing;
+        }
+
+        let pid = std::process::id() as u64;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+
+        let seed = Self::mix_seed(now ^ pid.rotate_left(17));
+
+        match RUN_SEED.compare_exchange(0, seed, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => seed,
+            Err(existing) => existing,
+        }
+    }
+
+    fn mix_seed(mut x: u64) -> u64 {
+        x = x.wrapping_add(0x9E3779B97F4A7C15);
+        x = (x ^ (x >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        x = (x ^ (x >> 27)).wrapping_mul(0x94D049BB133111EB);
+        x ^ (x >> 31)
     }
 }

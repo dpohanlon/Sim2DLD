@@ -1,5 +1,7 @@
 use godot::classes::{INode2D, Node2D, Polygon2D};
 use godot::prelude::*;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 
 #[derive(GodotClass)]
 #[class(base=Node2D)]
@@ -11,73 +13,71 @@ pub struct RandomGeometryGenerator {
 #[godot_api]
 impl INode2D for RandomGeometryGenerator {
     fn init(base: Base<Node2D>) -> Self {
-        // godot_print!("Hello, world! I am RandomGeometryGenerator");
-
         Self {
             base,
             polygons: Vec::new(),
         }
     }
 
-    fn ready(&mut self) {
+    fn ready(&mut self) {}
+}
+
+impl RandomGeometryGenerator {
+    pub fn new(seed: u64) -> Gd<Self> {
+        let mut generator = Gd::from_init_fn(|base| Self {
+            base,
+            polygons: Vec::new(),
+        });
+
+        generator.bind_mut().generate(seed);
+
+        generator
+    }
+
+    fn generate(&mut self, seed: u64) {
         const NUM_SHAPES: i32 = 100;
+
         let screen_width = 1024.0;
         let screen_height = 1024.0;
+        let arena_width = 1024.0;
+        let arena_height = 1024.0;
+        let wall_thickness = 10.0;
 
+        let mut rng = StdRng::seed_from_u64(seed);
         let mut polygons = Vec::new();
 
         for _ in 0..NUM_SHAPES {
-            if rand::random::<f32>() < 0.5 {
-                // godot_print!("Generating square!");
-                let square = self.generate_random_square(screen_width, screen_height);
-                polygons.push(square.clone());
-                self.base_mut().add_child(square);
+            if rng.gen_range(0.0..1.0) < 0.5 {
+                let square = self.generate_random_square(&mut rng, screen_width, screen_height);
+                self.base_mut().add_child(square.clone());
+                polygons.push(square);
             } else {
-                // godot_print!("Generating circle!");
-                let circle = self.generate_random_circle(screen_width, screen_height);
-                polygons.push(circle.clone());
-                self.base_mut().add_child(circle);
+                let circle = self.generate_random_circle(&mut rng, screen_width, screen_height);
+                self.base_mut().add_child(circle.clone());
+                polygons.push(circle);
             }
         }
 
-        // godot_print!(
-        //     "I am RandomGeometry and I have {} polygons",
-        //     self.polygons.len()
-        // );
-        //
-
-        let arena_width = 1024.0; // Example arena size
-        let arena_height = 1024.0; // Example arena size
-        let wall_thickness = 10.0; // Example wall thickness
-
-        // Generate walls
         let walls = self.create_arena_walls(arena_width, arena_height, wall_thickness);
 
-        // Add walls to the scene
         for wall in walls {
-            polygons.push(wall.clone());
-            self.base_mut().add_child(wall);
+            self.base_mut().add_child(wall.clone());
+            polygons.push(wall);
         }
 
         self.polygons = polygons;
     }
-}
 
-impl RandomGeometryGenerator {
-    pub fn new() -> Gd<Self> {
-        Gd::from_init_fn(|base| Self {
-            base,
-            polygons: Vec::new(),
-        })
-    }
-
-    fn generate_random_square(&mut self, screen_width: f32, screen_height: f32) -> Gd<Polygon2D> {
+    fn generate_random_square(
+        &mut self,
+        rng: &mut StdRng,
+        screen_width: f32,
+        screen_height: f32,
+    ) -> Gd<Polygon2D> {
         let mut polygon = Polygon2D::new_alloc();
 
-        // Define the size of the square
-        let size = rand_range(10.0, 100.0);
+        let size = rand_range(rng, 10.0, 100.0);
 
-        // Define the vertices for the square
         let mut vertices = vec![
             Vector2::new(0.0, 0.0),
             Vector2::new(size, 0.0),
@@ -86,8 +86,8 @@ impl RandomGeometryGenerator {
         ];
 
         let translation = Vector2::new(
-            rand_range(0.0, screen_width - size),
-            rand_range(0.0, screen_height - size),
+            rand_range(rng, 0.0, screen_width - size),
+            rand_range(rng, 0.0, screen_height - size),
         );
 
         for vertex in vertices.iter_mut() {
@@ -96,30 +96,26 @@ impl RandomGeometryGenerator {
 
         polygon.set_polygon(vertices.into());
 
-        // Set the color for the square
         let color = Color::from_rgba(180. / 255., 214. / 255., 205. / 255., 1.0);
         polygon.set_color(color);
-
-        // Rather than setting position, set points directly to avoid having to transform from local -> global coords
-        //
-        // let position = Vector2::new(
-        //     rand_range(0.0, screen_width - size),
-        //     rand_range(0.0, screen_height - size),
-        // );
-        // polygon.set_position(position);
 
         polygon
     }
 
-    fn generate_random_circle(&mut self, screen_width: f32, screen_height: f32) -> Gd<Polygon2D> {
+    fn generate_random_circle(
+        &mut self,
+        rng: &mut StdRng,
+        screen_width: f32,
+        screen_height: f32,
+    ) -> Gd<Polygon2D> {
         let mut circle = Polygon2D::new_alloc();
 
-        let radius = rand_range(10.0, 100.0);
+        let radius = rand_range(rng, 10.0, 100.0);
         let mut polygon = self.create_circle_polygon(radius);
 
         let translation = Vector2::new(
-            rand_range(0.0, screen_width - radius),
-            rand_range(0.0, screen_height - radius),
+            rand_range(rng, 0.0, screen_width - radius),
+            rand_range(rng, 0.0, screen_height - radius),
         );
 
         for vertex in polygon.iter_mut() {
@@ -131,26 +127,21 @@ impl RandomGeometryGenerator {
         let color = Color::from_rgba(180. / 255., 214. / 255., 205. / 255., 1.0);
         circle.set_color(color);
 
-        // let position = Vector2::new(
-        //     rand_range(0.0, screen_width),
-        //     rand_range(0.0, screen_height),
-        // );
-        // circle.set_position(position);
-
         circle
     }
 
     fn create_circle_polygon(&self, radius: f32) -> Vec<Vector2> {
         let num_points = 32;
         let mut points = Vec::new();
+
         for i in 0..num_points {
             let angle = std::f32::consts::PI * 2.0 * i as f32 / num_points as f32;
             points.push(Vector2::new(angle.cos(), angle.sin()) * radius);
         }
+
         points
     }
 
-    // Function to generate four walls for an arena with specified size and wall thickness
     fn create_arena_walls(
         &self,
         arena_width: f32,
@@ -159,20 +150,13 @@ impl RandomGeometryGenerator {
     ) -> Vec<Gd<Polygon2D>> {
         let mut walls = Vec::new();
 
-        // Top wall
         walls.push(self.create_wall(arena_width, wall_thickness, Vector2::new(0.0, 0.0)));
-
-        // Bottom wall
         walls.push(self.create_wall(
             arena_width,
             wall_thickness,
             Vector2::new(0.0, arena_height - wall_thickness),
         ));
-
-        // Left wall
         walls.push(self.create_wall(wall_thickness, arena_height, Vector2::new(0.0, 0.0)));
-
-        // Right wall
         walls.push(self.create_wall(
             wall_thickness,
             arena_height,
@@ -185,7 +169,6 @@ impl RandomGeometryGenerator {
     fn create_wall(&self, width: f32, height: f32, position: Vector2) -> Gd<Polygon2D> {
         let mut wall = Polygon2D::new_alloc();
 
-        // Offset the vertices by the position
         let vertices = vec![
             Vector2::new(0.0, 0.0) + position,
             Vector2::new(width, 0.0) + position,
@@ -194,15 +177,12 @@ impl RandomGeometryGenerator {
         ];
 
         wall.set_polygon(vertices.into());
-
-        // Set wall color (optional)
-        wall.set_color(Color::from_rgba(0.5, 0.5, 0.5, 1.0)); // Gray color
+        wall.set_color(Color::from_rgba(0.5, 0.5, 0.5, 1.0));
 
         wall
     }
 }
 
-// Helper function for generating random float range
-fn rand_range(min: f32, max: f32) -> f32 {
-    rand::random::<f32>() * (max - min) + min
+fn rand_range(rng: &mut StdRng, min: f32, max: f32) -> f32 {
+    rng.gen_range(min..max)
 }
